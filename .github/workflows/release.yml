@@ -63,14 +63,16 @@ jobs:
         run: |
           $artifact = "${{ env.BIN_NAME }}-${{ matrix.os }}.${{ matrix.archive }}"
           Compress-Archive -Path "${{ matrix.bin_path }}" -DestinationPath $artifact
-          echo "artifact=$artifact" >> $env:GITHUB_OUTPUT
+          # robustly write output in PowerShell
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact=$artifact"
         id: package-win
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BIN_NAME }}-${{ matrix.os }}
-          path: ${{ steps.package.outputs.artifact || steps.package-win.outputs.artifact }}
+          # deterministic path rather than relying on conditional step outputs
+          path: ${{ env.BIN_NAME }}-${{ matrix.os }}.${{ matrix.archive }}
 
   release:
     needs: build
