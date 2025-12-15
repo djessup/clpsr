@@ -12,6 +12,11 @@ struct Args {
     /// Optional path to a file containing CIDRs (one per line). If omitted, stdin is used.
     #[arg(short, long)]
     input: Option<PathBuf>,
+    /// Maximum number of extra addresses allowed when merging CIDRs. Defaults to 0 (lossless merging only).
+    /// When set to N > 0, the algorithm may merge networks even if the resulting supernet covers
+    /// addresses outside the original set, as long as the added address count ≤ N.
+    #[arg(short, long, default_value_t = 0)]
+    tolerance: u64,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let nets =
         parse_ipv4_nets(reader).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    let merged = merge_ipv4_nets(nets);
+    let merged = merge_ipv4_nets(nets, args.tolerance);
 
     for net in merged {
         println!("{net}");

@@ -10,7 +10,6 @@ env:
 
 jobs:
   checks:
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -19,6 +18,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
 
       - name: Cache cargo directories
         uses: actions/cache@v4
