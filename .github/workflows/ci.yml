@@ -10,7 +10,6 @@ env:
 
 jobs:
   checks:
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     runs-on: ubuntu-latest
 
     steps:
