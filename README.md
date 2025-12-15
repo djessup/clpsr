@@ -160,6 +160,64 @@ Output (tolerance 512):
 10.10.0.0/22
 ```
 
+## Development
+
+### Running tests
+
+The project uses [`cargo-nextest`](https://nexte.st/) for faster test execution and better output. Nextest provides:
+
+- **Faster test execution**: Parallel test running with better resource utilization
+- **Better output**: Clearer test results with better formatting and progress indicators
+- **Test retries**: Automatic retry of flaky tests (configured in `nextest.toml`)
+- **JUnit XML reports**: For CI/CD integration
+
+```bash
+# Install nextest (if not already installed)
+cargo install cargo-nextest
+
+# Run all tests with nextest
+cargo nextest run
+
+# Run only unit tests
+cargo nextest run --lib
+
+# Run only integration tests
+cargo nextest run --test integration_test
+
+# Run tests with specific profile
+cargo nextest run --profile ci
+
+# You can also use the standard cargo test command
+cargo test
+```
+
+### Code coverage
+
+The project uses `cargo-llvm-cov` for code coverage reporting. To generate coverage reports locally:
+
+```bash
+# Install cargo-llvm-cov
+cargo install cargo-llvm-cov
+
+# Generate coverage report (LCOV format)
+cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+
+# Generate HTML coverage report
+cargo llvm-cov --all-features --workspace --html --output-dir coverage
+```
+
+Coverage reports are automatically generated in CI and uploaded as artifacts. Coverage data is also sent to Codecov (if configured) for tracking coverage trends over time.
+
+### Benchmarks
+
+Run benchmarks with:
+
+```bash
+cargo bench
+```
+
+Benchmark results are stored in `target/criterion/` and include HTML reports.
+
 ## Troubleshooting
 
 - Ensure all lines are valid IPv4 CIDRs; errors include the failing line number.
