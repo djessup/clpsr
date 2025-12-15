@@ -3,6 +3,33 @@ name = "clpsr"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "clpsr"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 ipnet = "2.9"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "parse_bench"
+harness = false
+
+[[bench]]
+name = "merge_bench"
+harness = false
+
+[profile.release]
+# Maximum optimization level
+opt-level = 3
+# Link-time optimization for better performance
+lto = "thin"
+# Single codegen unit for better optimization (slower compile time)
+codegen-units = 1
+# Strip debug symbols to reduce binary size
+strip = true
+# Enable overflow checks in release mode (can disable for max performance)
+overflow-checks = false

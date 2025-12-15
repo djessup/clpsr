@@ -7,7 +7,7 @@
 ## SYNOPSIS
 
 ```
-clpsr [--input <FILE>]
+clpsr [--input <FILE>] [--tolerance <N>]
 ```
 
 Reads CIDRs from standard input when `--input` is omitted. Each line should contain a single IPv4 CIDR.
@@ -20,6 +20,8 @@ Reads CIDRs from standard input when `--input` is omitted. Each line should cont
 
 - `-i`, `--input <FILE>`
   - Read CIDRs from the provided file instead of stdin.
+- `-t`, `--tolerance <N>`
+  - Maximum number of extra addresses allowed when merging CIDRs (default: 0). When set to N > 0, the algorithm may merge networks even if the resulting supernet covers addresses outside the original set, as long as the added address count ≤ N. Can be specified as an integer (e.g., `512`) or a bit mask size (e.g., `/22`). Bit mask sizes are converted to the equivalent number of addresses (e.g., `/22` = 1024 addresses, `/16` = 65536 addresses). See [Tolerance-based merging](#tolerance-based-merging) for details.
 - `-h`, `--help`
   - Show a short usage summary and exit.
 - `-V`, `--version`
@@ -35,7 +37,7 @@ Reads CIDRs from standard input when `--input` is omitted. Each line should cont
 ## MODES
 
 - **Lossless merge (default):** Deduplicates, removes covered subnets, and merges adjacent CIDRs that form an exact supernet. No data is dropped beyond redundant or fully covered ranges.
-- **Tolerance-based merging:** Not implemented. `clpsr` refuses to approximate or widen ranges; any tolerance-driven behavior must be performed upstream before invoking the tool.
+- **Tolerance-based merging:** When `--tolerance N` is specified with N > 0, the tool may merge networks that introduce extra addresses, as long as the added address count does not exceed N. Tolerance can be specified as an integer (e.g., `512`) or a bit mask size (e.g., `/22`). See [Tolerance-based merging](#tolerance-based-merging) for details.
 
 ## EXAMPLES
 
@@ -72,6 +74,47 @@ Invalid input produces a line-specific error:
 echo -e "10.0.0.0/24\nnot-a-cidr" | clpsr
 # Line 2: invalid IPv4 address syntax
 ```
+
+Tolerance-based merging example:
+
+```bash
+# Without tolerance: networks remain separate
+echo -e "10.0.0.0/24\n10.0.2.0/24" | clpsr
+# 10.0.0.0/24
+# 10.0.2.0/24
+
+# With integer tolerance >= 512: can merge into /22 (adds 512 addresses)
+echo -e "10.0.0.0/24\n10.0.2.0/24" | clpsr --tolerance 512
+# 10.0.0.0/22
+
+# Using bit mask format: /22 = 1024 addresses
+echo -e "10.0.0.0/24\n10.0.2.0/24" | clpsr --tolerance /22
+# 10.0.0.0/22
+```
+
+## TOLERANCE-BASED MERGING
+
+By default (`--tolerance 0`), `clpsr` only performs lossless merging where the resulting supernet exactly represents the original networks. With `--tolerance N` where N > 0, the tool may merge networks that introduce extra addresses, as long as the added address count does not exceed N.
+
+**Tolerance format:**
+
+- **Integer format:** Specify the exact number of extra addresses allowed (e.g., `--tolerance 512`).
+- **Bit mask format:** Specify a prefix length, which is converted to the equivalent number of addresses (e.g., `--tolerance /22` = 1024 addresses, `--tolerance /16` = 65536 addresses).
+
+**How tolerance works:**
+
+1. The algorithm evaluates potential merges by computing the minimal supernet that covers both networks.
+2. It calculates the number of extra addresses: `supernet_addresses - (network1_addresses + network2_addresses - overlap)`.
+3. If the extra address count ≤ tolerance, the merge is accepted.
+4. Tolerance is applied per merge operation, not globally. Each merge is evaluated independently against the tolerance budget.
+5. The algorithm prioritizes merges that minimize the total CIDR count while respecting the tolerance constraint.
+
+**Edge cases and considerations:**
+
+- **Overlapping networks:** When networks overlap, the overlap is correctly accounted for in the extra address calculation.
+- **Exact merges preferred:** Adjacent networks that can merge exactly (0 extra addresses) are always merged, regardless of tolerance.
+- **Iterative merging:** The algorithm continues merging until no further merges are possible, potentially using tolerance across multiple iterations.
+- **Tolerance per merge:** Each merge operation is evaluated independently. If tolerance is 512 and a merge adds 512 addresses, it's accepted. Subsequent merges are also evaluated independently with the same tolerance budget.
 
 ## EXIT CODES
 

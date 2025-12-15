@@ -1,226 +1,229 @@
 # AGENTS.md
 
-This document guides LLM agents working within the `clpsr` repository to achieve better performance across Project Comprehension, Context Efficiency, Steering (Conventions & Patterns), and Output Quality & Completeness.
-
 ## 1. Project Overview & Purpose
 
 ### System Purpose & Constraints
 
-`clpsr` is a command-line utility written in Rust that merges IPv4 CIDR (Classless Inter-Domain Routing) network blocks into a minimal covering set. The tool reads CIDR blocks from stdin or a file, parses them, deduplicates, and merges adjacent networks where possible. Primary users are network administrators and DevOps engineers who need to consolidate IP address ranges. Key use cases include: (1) cleaning up firewall rules by merging adjacent CIDR blocks, (2) optimizing IP allowlists/blocklists, (3) reducing the size of network configuration files, and (4) validating and normalizing CIDR input. The tool prioritizes correctness over performance (handles typical workloads efficiently), processes input line-by-line for memory efficiency, and outputs results to stdout for pipeline integration.
+`clpsr` merges IPv4 CIDR blocks into a minimal covering set. Reads from stdin or file, parses, deduplicates, merges adjacent networks. Processes input line-by-line for memory efficiency, outputs to stdout. Optional tolerance parameter allows merging networks that introduce extra addresses within a specified budget.
 
 ### Critical Invariants
 
-- **Input parsing**: Empty lines are ignored; invalid CIDRs must return descriptive errors with line numbers
-- **Merging algorithm**: Networks are merged only when they are adjacent and have identical prefix lengths, and their combined supernet exactly represents both subnets
-- **Output ordering**: Results are sorted by network address (as u32), then by prefix length
-- **Coverage removal**: Subnets fully covered by supernets are removed from output
-- **Iterative merging**: The algorithm continues merging until no further merges are possible
-- **Error propagation**: Parsing errors return `String` error messages; I/O errors use standard `io::Error`
-- **Pure functions**: Core merging logic in `lib.rs` has no side effects; all I/O is isolated to `main.rs`
+- **Input parsing**: Empty lines ignored; invalid CIDRs return descriptive errors with line numbers
+- **Merging algorithm**: Networks merge only when adjacent with identical prefix lengths and combined supernet exactly represents both subnets (tolerance=0). With tolerance > 0, networks may merge if extra address count ≤ tolerance
+- **Output ordering**: Sorted by network address (as u32), then by prefix length
+- **Coverage removal**: Subnets fully covered by supernets are removed
+- **Iterative merging**: Continues until no further merges possible
+- **Error propagation**: Parsing errors return `String`; I/O errors use `io::Error`
+- **Pure functions**: Core logic in `lib.rs` has no side effects; all I/O isolated to `main.rs`
+- **Tolerance semantics**: Applied per merge operation, not globally; exact merges (0 extra addresses) always preferred
 
 ### Key Dependencies
 
-- **`ipnet`** (v2.9): Provides `Ipv4Net` type for CIDR representation and parsing. Used throughout `lib.rs` for network operations.
-- **`clap`** (v4.5 with derive feature): CLI argument parsing via derive macros. Used only in `main.rs` for command-line interface.
-- **Standard library**: `std::io::BufRead` for line-by-line input processing, `std::fs::File` for file I/O.
-
-### Domain Glossary
-
-- **CIDR**: Classless Inter-Domain Routing notation (e.g., `192.168.1.0/24`)
-- **Prefix length**: The number of network bits in CIDR notation (e.g., `/24` means 24 network bits)
-- **Supernet**: A network that contains one or more subnets (e.g., `10.0.0.0/23` contains `10.0.0.0/24` and `10.0.1.0/24`)
-- **Adjacent networks**: Two networks with the same prefix length whose address ranges are consecutive and can be merged into a single supernet
-- **Covering set**: A minimal set of networks that represents all input networks without redundancy
+- **`ipnet`** (v2.9): `Ipv4Net` type for CIDR representation and parsing. Used throughout `lib.rs`.
+- **`clap`** (v4.5 with derive): CLI argument parsing. Used only in `main.rs`.
+- **`criterion`** (dev-dependency): Benchmarking framework in `benches/`.
 
 ### Architecture Overview
 
-1. **CLI Entry Point** (`src/main.rs`): Parses command-line arguments, handles I/O (stdin/file), calls library functions, outputs results
-2. **Core Library** (`src/lib.rs`): Contains parsing logic (`parse_ipv4_nets`), merging algorithm (`merge_ipv4_nets`), and helper functions (`sort_and_dedup`, `remove_covered_nets`, `network_covers`, `try_merge`)
-3. **Test Suite** (`src/lib.rs` mod tests): Unit tests for merging logic, embedded in library file
+1. **CLI Entry Point** (`src/main.rs`): Parses `--input`, `--tolerance`; handles I/O; calls library functions
+2. **Core Library** (`src/lib.rs`): `parse_ipv4_nets`, `merge_ipv4_nets`, helpers (`sort_and_dedup`, `remove_covered_nets`, `network_covers`, `try_merge_exact`, `try_merge_with_tolerance`, `find_covering_supernet`)
+3. **Tests**: `src/lib.rs` mod tests (unit), `tests/integration_test.rs` (integration)
+4. **Benchmarks**: `benches/parse_bench.rs`, `benches/merge_bench.rs`
 
 ## 2. Repository Structure & Navigation
 
 ### Repository Map
 
-- **`src/`**: All source code
-  - `src/main.rs`: CLI entry point, argument parsing, I/O handling
-  - `src/lib.rs`: Core library functions, parsing, merging algorithm, tests
-- **`target/`**: Build artifacts (generated by Cargo) - **Do not modify**
-- **`Cargo.toml`**: Project metadata, dependencies, edition (2024)
-- **`Cargo.lock`**: Locked dependency versions (auto-generated)
-- **`LICENSE`**: Apache 2.0 license text
+- **`src/`**: `main.rs` (CLI), `lib.rs` (core library + unit tests)
+- **`tests/`**: `integration_test.rs` (end-to-end tests)
+- **`benches/`**: `parse_bench.rs`, `merge_bench.rs` (performance benchmarks)
+- **`target/`**: Build artifacts - **Do not modify**
+- **`Cargo.toml`**: Dependencies, edition (2024)
+- **`Cargo.lock`**: Auto-generated - **Do not modify**
 
 ### Golden Path Trace
 
-Complete end-to-end flow for processing CIDR input:
-
-1. **Entry**: `src/main.rs::main()` - Program starts
-2. **CLI Parsing**: `src/main.rs::Args::parse()` - Parses `--input` flag (clap derive)
-3. **Input Setup**: `src/main.rs::main()` lines 20-23 - Creates `BufRead` from stdin or file
-4. **Parsing**: `src/lib.rs::parse_ipv4_nets()` - Reads lines, parses CIDRs, returns `Vec<Ipv4Net>`
-5. **Merging**: `src/lib.rs::merge_ipv4_nets()` - Normalizes, deduplicates, merges iteratively
-   - Calls `sort_and_dedup()` - Sorts by address/prefix, removes duplicates
-   - Calls `try_merge()` - Attempts to merge adjacent pairs
-   - Calls `remove_covered_nets()` - Removes subnets covered by supernets
-   - Repeats until no changes
-6. **Output**: `src/main.rs::main()` lines 29-31 - Prints each merged network to stdout
+1. `src/main.rs::main()` (line 22) - Entry
+2. `src/main.rs::Args::parse()` (line 23) - Parse `--input`, `--tolerance`
+3. `src/main.rs::main()` (lines 25-28) - Create `BufRead` from stdin/file
+4. `src/lib.rs::parse_ipv4_nets()` (line 9) - Parse CIDRs, return `Vec<Ipv4Net>`
+5. `src/lib.rs::merge_ipv4_nets()` (line 38) - Merge iteratively:
+   - `sort_and_dedup()` (line 40)
+   - `try_merge_with_tolerance()` (line 52)
+   - `remove_covered_nets()` (line 65)
+   - Repeat until no changes (lines 42-68)
+6. `src/main.rs::main()` (lines 34-36) - Print results
 
 ### Task→Location Routing Table
 
-| If you need to... | Start in (paths) | Usually touch (paths) |
-|-------------------|------------------|------------------------|
+| Task | Start in | Usually touch |
+|------|----------|----------------|
 | Modify CLI arguments/flags | `src/main.rs` | `src/main.rs` |
-| Change parsing behavior | `src/lib.rs::parse_ipv4_nets` | `src/lib.rs`, tests in `src/lib.rs` |
-| Modify merging algorithm | `src/lib.rs::merge_ipv4_nets` | `src/lib.rs`, helper functions, tests |
-| Add new utility functions | `src/lib.rs` (public or private) | `src/lib.rs`, tests if public |
-| Add integration tests | `src/main.rs` or new `tests/` directory | `src/main.rs` or `tests/*.rs` |
-| Update dependencies | `Cargo.toml` | `Cargo.toml`, `Cargo.lock` (auto-updated) |
-| Add new test cases | `src/lib.rs` mod tests | `src/lib.rs` |
+| Change parsing behavior | `src/lib.rs::parse_ipv4_nets` | `src/lib.rs`, tests |
+| Modify merging algorithm | `src/lib.rs::merge_ipv4_nets` | `src/lib.rs`, helpers, tests |
+| Add utility functions | `src/lib.rs` | `src/lib.rs`, tests if public |
+| Add integration tests | `tests/integration_test.rs` | `tests/integration_test.rs` |
+| Add benchmarks | `benches/` | `benches/*.rs` |
+| Update dependencies | `Cargo.toml` | `Cargo.toml` |
+| Add test cases | `src/lib.rs` mod tests | `src/lib.rs` |
 
 ### Do-Not-Open List
 
-- **`target/`**: Entire directory contains build artifacts, incremental compilation data, and dependency metadata. Never modify manually.
-- **`Cargo.lock`**: Auto-generated dependency lock file. Only modify via `cargo update` commands.
+- **`target/`**: Build artifacts, never modify
+- **`Cargo.lock`**: Auto-generated, only modify via `cargo update`
 
 ### Entry Point Index
 
-- **CLI executable**: `src/main.rs::main()` - Run via `cargo run` or `cargo run -- --input <file>`
-- **Library functions**: `src/lib.rs` - Public functions: `parse_ipv4_nets()`, `merge_ipv4_nets()`
-- **Test suite**: `src/lib.rs` mod tests - Run via `cargo test` or `cargo test --lib`
+- **CLI**: `src/main.rs::main()` - `cargo run -- --input <file> --tolerance <N>`
+- **Library**: `src/lib.rs` - Public: `parse_ipv4_nets()`, `merge_ipv4_nets()`
+- **Unit tests**: `src/lib.rs` mod tests - `cargo test --lib`
+- **Integration tests**: `tests/integration_test.rs` - `cargo test --test integration_test`
+- **Benchmarks**: `benches/*.rs` - `cargo bench`
 
 ### When to Use Retrieval vs Direct Inspection
 
-- **Use codebase retrieval** when:
-  - You don't know which file contains the function you need
-  - Searching for how a specific concept is implemented (e.g., "How does merging work?")
-  - Understanding the overall structure and relationships
-
-- **Use direct file view** when:
-  - You have the exact file path (e.g., `src/lib.rs`)
-  - You need to see the complete implementation of a known function
-  - Reading tests for a specific function
-
-- **Use symbol search** when:
-  - Looking for all usages of a function (e.g., `merge_ipv4_nets`)
-  - Finding where a type is used (e.g., `Ipv4Net`)
-
-- **Use regex search** when:
-  - Finding specific patterns (e.g., all `#[test]` functions)
-  - Searching for error messages or string literals
+- **Codebase retrieval**: Don't know which file contains function; searching for concept implementation; understanding structure
+- **Direct file view**: Have exact path; need complete implementation; reading tests for specific function
+- **Symbol search**: Finding all usages of function/type
+- **Regex search**: Finding patterns (e.g., `#[test]`), error messages, string literals
 
 ### Component Boundaries
 
-- **`main.rs`**: Handles all I/O, CLI parsing, and orchestration. Does NOT contain business logic.
-- **`lib.rs`**: Contains all parsing and merging logic. Does NOT perform I/O or CLI parsing. Public API is minimal (two functions).
+- **`main.rs`**: I/O, CLI parsing, orchestration. NO business logic.
+- **`lib.rs`**: Parsing, merging logic. NO I/O or CLI parsing. Public API: 2 functions.
+- **`tests/integration_test.rs`**: End-to-end CLI/library tests. NO unit tests.
 
 ### Minimal Working Sets
 
-- **CLI changes**: `src/main.rs`, `Cargo.toml` (if adding dependencies)
-- **Core algorithm changes**: `src/lib.rs` (all functions and tests in one file)
-- **Adding tests**: `src/lib.rs` mod tests section
+- **CLI changes**: `src/main.rs`, `Cargo.toml` (if adding deps)
+- **Algorithm changes**: `src/lib.rs` (functions + tests)
+- **Adding tests**: `src/lib.rs` mod tests (unit) or `tests/integration_test.rs` (integration)
+- **Adding benchmarks**: `benches/*.rs`
 
 ### Saved Search Recipes
 
-- Find all test functions: `#[test]`
-- Find public functions: `^pub fn`
-- Find error handling: `map_err|Result<|Err\(`
-- Find network operations: `Ipv4Net|prefix_len|network\(\)`
+- Test functions: `#[test]`
+- Public functions: `^pub fn`
+- Test helpers: `^pub\(crate\) fn`
+- Error handling: `map_err|Result<|Err\(`
+- Network operations: `Ipv4Net|prefix_len|network\(\)`
+- Tolerance code: `tolerance|try_merge_with_tolerance`
 
 ## 3. Conventions, Patterns & Standards
 
 ### Enforced Style & Lint Rules
 
-- **Formatter**: `cargo fmt` - Run before committing. Uses default Rust formatting rules.
-- **Linter**: `cargo clippy` - Run for additional lint checks. Fix all warnings.
-- **Type checking**: `cargo check` - Validates compilation without building artifacts.
-- **Full build**: `cargo build` - Compiles the project.
-- **Tests**: `cargo test` - Runs all tests. Use `cargo test --lib` for library tests only.
+- **Formatter**: `cargo fmt`
+- **Linter**: `cargo clippy` (fix all warnings)
+- **Type check**: `cargo check`
+- **Build**: `cargo build` (use `--release` for optimized)
+- **Tests**: `cargo test` (`--lib` for unit only, `--test integration_test` for integration)
+- **Benchmarks**: `cargo bench`
 
 ### Naming Conventions
 
-- **Functions/methods**: `snake_case` with descriptive verbs (e.g., `parse_ipv4_nets`, `merge_ipv4_nets`, `remove_covered_nets`)
-- **Private helpers**: `snake_case`, often prefixed with action (e.g., `try_merge`, `sort_and_dedup`, `network_covers`)
-- **Types**: Use library types (`Ipv4Net` from `ipnet`). No custom types currently.
-- **Files**: `snake_case.rs` (e.g., `main.rs`, `lib.rs`)
-- **Tests**: Test functions use descriptive names matching what they test (e.g., `merges_adjacent_subnets`, `removes_covered_subnets`)
-- **CLI arguments**: `kebab-case` in help text, `snake_case` in struct fields (e.g., `--input` flag, `input: Option<PathBuf>`)
+- **Functions**: `snake_case` with verbs (`parse_ipv4_nets`, `merge_ipv4_nets`, `remove_covered_nets`)
+- **Helpers**: `snake_case`, action-prefixed (`try_merge_exact`, `sort_and_dedup`, `network_covers`)
+- **Implementation**: `_impl` suffix for logic, wrappers handle `#[cfg]` attributes
+- **Types**: Use `Ipv4Net` from `ipnet`. No custom types.
+- **Files**: `snake_case.rs`
+- **Tests**: Descriptive names matching what they test (`merges_adjacent_subnets`, `tolerance_allows_non_adjacent_merge`)
+- **CLI args**: `kebab-case` in help, `snake_case` in struct fields
 
 ### Existing Utilities Index
 
-- **`src/lib.rs::parse_ipv4_nets<R: BufRead>(reader: R) -> Result<Vec<Ipv4Net>, String>`**: Parses CIDR blocks from buffered reader. Ignores empty lines. Returns errors with line numbers. Use for all CIDR parsing.
-- **`src/lib.rs::merge_ipv4_nets(nets: Vec<Ipv4Net>) -> Vec<Ipv4Net>`**: Merges and normalizes CIDR list. Returns minimal covering set. Use for all merging operations.
-- **`ipnet::Ipv4Net`**: Core type for CIDR representation. Use `parse()` method for string parsing, `addr()`, `prefix_len()`, `network()`, `broadcast()` for operations.
+- **`src/lib.rs::parse_ipv4_nets<R: BufRead>(reader: R) -> Result<Vec<Ipv4Net>, String>`**: Parse CIDRs from reader. Ignores empty lines. Errors include line numbers.
+- **`src/lib.rs::merge_ipv4_nets(nets: Vec<Ipv4Net>, tolerance: u64) -> Vec<Ipv4Net>`**: Merge and normalize. Tolerance controls extra addresses (0 = lossless).
+- **`ipnet::Ipv4Net`**: Core CIDR type. Use `parse()`, `addr()`, `prefix_len()`, `network()`, `broadcast()`.
+- **`src/lib.rs::sort_and_dedup(nets: &mut Vec<Ipv4Net>)`** (pub(crate)): Sort by address/prefix, remove duplicates.
+- **`src/lib.rs::remove_covered_nets(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool)`** (pub(crate)): Remove covered subnets, return compacted list and changed flag.
+- **`src/lib.rs::network_covers(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool`** (pub(crate)): Check if supernet covers subnet.
 
 ### Modify vs Extend vs Create Decision Rules
 
-- **Do NOT modify** generated files (`target/`, `Cargo.lock`) - these are auto-generated
-- **Extend existing functions** when adding similar functionality (e.g., add new merging strategies within `merge_ipv4_nets`)
-- **Create new private helper functions** in `lib.rs` when introducing orthogonal logic (e.g., `try_merge`, `network_covers`)
-- **Create new public functions** in `lib.rs` only if they represent distinct, reusable operations
-- **Modify `main.rs`** for CLI changes (new flags, different I/O handling)
-- **Add tests** in the existing `mod tests` block in `lib.rs` - keep tests co-located with code
-- **Create new modules** (`mod` blocks) only if the file grows too large (>500 lines) or introduces distinct concerns
+- **Do NOT modify**: `target/`, `Cargo.lock` (auto-generated)
+- **Extend existing functions**: When adding similar functionality
+- **Create private helpers**: In `lib.rs` for orthogonal logic (`try_merge_exact`, `network_covers`, `find_covering_supernet`)
+- **Create public functions**: Only if distinct, reusable operations
+- **Modify `main.rs`**: For CLI changes (flags, I/O handling)
+- **Add tests**: In `src/lib.rs` mod tests (unit) or `tests/integration_test.rs` (integration)
+- **Create modules**: Only if file >1000 lines or distinct concerns
+- **Use `pub(crate)`**: For testable functions not in public API
 
 ### Anti-Patterns & Deprecated Approaches
 
-❌ **DON'T**: Parse CIDR strings manually or use regex
+❌ **DON'T**: Parse CIDR strings manually
+
 ```rust
-// Bad: Manual parsing
 let parts: Vec<&str> = cidr.split('/').collect();
 ```
 
-✅ **DO**: Use `ipnet::Ipv4Net::parse()` or `parse_ipv4_nets()` utility
+✅ **DO**: Use `ipnet::Ipv4Net::parse()` or `parse_ipv4_nets()`
+
 ```rust
-// Good: Use library function
 let net: Ipv4Net = cidr.parse()?;
 ```
 
 ❌ **DON'T**: Perform I/O in library functions (`lib.rs`)
+
 ```rust
-// Bad: I/O in library
 pub fn process_file(path: &str) -> Vec<Ipv4Net> {
     let file = File::open(path)?; // Don't do this in lib.rs
 }
 ```
 
-✅ **DO**: Keep I/O in `main.rs`, pass `BufRead` to library functions
+✅ **DO**: Keep I/O in `main.rs`, pass `BufRead` to library
+
 ```rust
-// Good: I/O in main.rs, pass reader to library
 let reader = BufReader::new(File::open(path)?);
 let nets = parse_ipv4_nets(reader)?;
 ```
 
-❌ **DON'T**: Modify input vectors in place without clear intent
+❌ **DON'T**: Modify vectors in place without clear intent
+
 ```rust
-// Bad: Unclear mutation
 fn merge(nets: &mut Vec<Ipv4Net>) { nets.sort(); }
 ```
 
-✅ **DO**: Use descriptive function names and clear ownership
+✅ **DO**: Use descriptive names and clear ownership
+
 ```rust
-// Good: Clear intent
 fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) { /* ... */ }
+```
+
+❌ **DON'T**: Hardcode tolerance
+
+```rust
+let merged = merge_ipv4_nets(nets, 512); // Magic number
+```
+
+✅ **DO**: Pass tolerance from CLI
+
+```rust
+let merged = merge_ipv4_nets(nets, args.tolerance);
 ```
 
 ### Architectural Principles
 
-- **Separation of concerns**: I/O (`main.rs`) vs. business logic (`lib.rs`)
-- **Pure functions**: Core algorithms have no side effects, making them testable
-- **Error handling**: Use `Result<T, E>` for fallible operations. Return descriptive errors with context (line numbers for parsing errors)
-- **Ownership**: Prefer owned types (`Vec<Ipv4Net>`) for return values to allow callers flexibility
+- **Separation**: I/O (`main.rs`) vs. logic (`lib.rs`)
+- **Pure functions**: Core algorithms have no side effects
+- **Error handling**: `Result<T, E>` with context (line numbers for parsing errors)
+- **Ownership**: Prefer owned types (`Vec<Ipv4Net>`) for return values
+- **Test visibility**: `pub(crate)` with `#[cfg(test)]` wrappers for test-only visibility
 
-**Example violation and fix**:
+**Example violation**:
 
 ❌ **Violation**: Mixing I/O with parsing
+
 ```rust
 // In lib.rs - WRONG
 pub fn parse_file(path: &str) -> Result<Vec<Ipv4Net>, String> {
     let file = File::open(path)?; // I/O in library
-    // ...
 }
 ```
 
 ✅ **Fix**: Separate I/O from parsing
+
 ```rust
 // In lib.rs - CORRECT
 pub fn parse_ipv4_nets<R: BufRead>(reader: R) -> Result<Vec<Ipv4Net>, String> {
@@ -234,100 +237,94 @@ let nets = parse_ipv4_nets(reader)?;
 
 ### Performance Patterns
 
-- **Streaming input**: Use `BufRead` trait for line-by-line processing, avoiding loading entire file into memory
-- **Iterative merging**: Algorithm continues until fixed point (no more merges possible) - efficient for typical workloads
-- **In-place sorting**: `sort_and_dedup` modifies vector in place to avoid allocations
-- **Early termination**: Empty input returns immediately without processing
+- **Streaming input**: Use `BufRead` for line-by-line processing
+- **Iterative merging**: Continues until fixed point
+- **In-place sorting**: `sort_and_dedup` modifies vector in place
+- **Early termination**: Empty input returns immediately
+- **Tolerance evaluation**: Checked per merge operation, not accumulated
 
 ## 4. Quality Standards & Completeness Requirements
 
 ### Definition of Done Checklist
 
-Every change must:
-
-- [ ] **Tests updated/added**: Add tests for new functionality in `src/lib.rs` mod tests. Update existing tests if behavior changes.
-- [ ] **Formatter passes**: Run `cargo fmt` and ensure no formatting changes needed
-- [ ] **Linter passes**: Run `cargo clippy` and fix all warnings
-- [ ] **Type checks**: Run `cargo check` and ensure compilation succeeds
-- [ ] **All tests pass**: Run `cargo test` and verify all tests pass
-- [ ] **Error handling**: New fallible operations return `Result<T, E>` with descriptive errors
-- [ ] **Documentation**: Public functions have doc comments (`///`) explaining purpose, parameters, return values, and errors
-- [ ] **Input validation**: Parsing functions validate input and return errors with context (line numbers)
-- [ ] **No panics**: Avoid `unwrap()` or `expect()` in library code; use proper error handling
+- [ ] **Tests updated/added**: In `src/lib.rs` mod tests (unit) or `tests/integration_test.rs` (integration)
+- [ ] **Formatter passes**: `cargo fmt` (no changes needed)
+- [ ] **Linter passes**: `cargo clippy` (fix all warnings)
+- [ ] **Type checks**: `cargo check` succeeds
+- [ ] **All tests pass**: `cargo test` (unit + integration)
+- [ ] **Error handling**: Fallible operations return `Result<T, E>` with descriptive errors
+- [ ] **Documentation**: Public functions have doc comments (`///`) with purpose, params, returns, errors
+- [ ] **Input validation**: Parsing functions validate input, return errors with context (line numbers)
+- [ ] **No panics**: Avoid `unwrap()`/`expect()` in library code
 - [ ] **Backward compatibility**: Public API changes maintain compatibility or document breaking changes
 
 ### How to Run Tests Quickly
 
 ```bash
-# Run all tests
-cargo test
-
-# Run only library tests (excludes doc tests if added)
-cargo test --lib
-
-# Run a specific test by name pattern
-cargo test merges_adjacent
-
-# Run tests with output (show println! output)
-cargo test -- --nocapture
-
-# Run tests in single-threaded mode (useful for debugging)
-cargo test -- --test-threads=1
+cargo test                          # All tests
+cargo test --lib                    # Unit tests only
+cargo test --test integration_test  # Integration tests only
+cargo test merges_adjacent          # Specific test pattern
+cargo test -- --nocapture           # Show println! output
+cargo test -- --test-threads=1      # Single-threaded (debugging)
+cargo bench                         # Benchmarks
 ```
 
 ### Security & Compliance Guardrails
 
-- **Input validation**: All CIDR parsing validates format via `ipnet::Ipv4Net::parse()`. Invalid input returns errors, never panics.
-- **No secrets handling**: This tool does not handle secrets or authentication. No special security considerations beyond input validation.
-- **Safe deserialization**: Uses `ipnet` library for parsing, which handles malformed input safely (returns `Result`).
-- **Dependency constraints**: Pin critical dependencies in `Cargo.toml`. Review `Cargo.lock` for dependency updates.
-- **File I/O**: Uses standard library file operations. No special permissions required beyond file read access.
+- **Input validation**: CIDR parsing validates via `ipnet::Ipv4Net::parse()`. Invalid input returns errors, never panics.
+- **No secrets**: Tool doesn't handle secrets/auth. No special security beyond input validation.
+- **Safe deserialization**: Uses `ipnet` library (returns `Result`).
+- **Dependency constraints**: Pin in `Cargo.toml`. Review `Cargo.lock` for updates.
+- **File I/O**: Standard library operations. No special permissions needed.
 
 ### Performance/Footprint Budgets
 
-- **Memory**: Processes input line-by-line (`BufRead`) to handle large files efficiently. Avoid loading entire file into memory.
-- **Algorithm complexity**: Merging algorithm is iterative but efficient for typical use cases (<1000 networks). For very large inputs (>10,000 networks), consider optimization.
-- **Common pitfalls to avoid**:
-  - ❌ Loading entire file into memory: `std::fs::read_to_string()` for large files
-  - ✅ Use `BufRead` for streaming: `BufReader::new(File::open()?)`
-  - ❌ Parsing CIDRs multiple times: Parse once, reuse `Ipv4Net` values
-  - ✅ Single parse pass: Parse in `parse_ipv4_nets`, reuse parsed values
+- **Memory**: Process line-by-line (`BufRead`) for large files. Avoid loading entire file.
+- **Algorithm complexity**: Efficient for <1000 networks. Consider optimization for >10,000.
+- **Pitfalls**:
+  - ❌ `std::fs::read_to_string()` for large files
+  - ✅ `BufRead` for streaming: `BufReader::new(File::open()?)`
+  - ❌ Parsing CIDRs multiple times
+  - ✅ Single parse pass, reuse `Ipv4Net` values
+  - ❌ Unnecessary copies
+  - ✅ In-place operations: `sort_and_dedup` modifies vector
 
-**Detection commands**:
+**Detection**:
+
 ```bash
-# Check for large allocations (requires profiling tools)
-cargo build --release
-# Use external profiler (valgrind, heaptrack, etc.)
-
-# Check binary size
-ls -lh target/release/clpsr
+cargo build --release              # Optimized build
+ls -lh target/release/clpsr         # Binary size
+cargo bench                         # Performance regressions
 ```
 
 ### API/Schema Change Impact Checklist
 
-When changing public API (`src/lib.rs` public functions) or CLI interface:
+When changing public API (`src/lib.rs` public functions) or CLI:
 
-- [ ] **Update all callers**: Check `src/main.rs` for usage of changed functions
-- [ ] **Update tests**: Modify tests to match new signatures/behavior
-- [ ] **Update documentation**: Update doc comments (`///`) for changed functions
-- [ ] **Maintain backward compatibility**: Or document breaking changes clearly
-- [ ] **Version bump**: Update version in `Cargo.toml` if making breaking changes
-- [ ] **CLI help text**: Update `clap` derive attributes (`about`, `long_about`) if CLI changes
+- [ ] **Update callers**: Check `src/main.rs` for usage
+- [ ] **Update tests**: Match new signatures/behavior
+- [ ] **Update documentation**: Doc comments (`///`) for changed functions
+- [ ] **Backward compatibility**: Maintain or document breaking changes
+- [ ] **Version bump**: Update `Cargo.toml` version if breaking
+- [ ] **CLI help**: Update `clap` derive attributes if CLI changes
 
-**Example**: If changing `merge_ipv4_nets` signature:
-1. Update function signature in `src/lib.rs`
-2. Update call site in `src/main.rs`
-3. Update all tests in `src/lib.rs` mod tests
-4. Update doc comment for function
-5. Run `cargo test` to verify
+**Example**: Changing `merge_ipv4_nets` signature:
+1. Update signature in `src/lib.rs`
+2. Update call site in `src/main.rs` (line 32)
+3. Update tests in `src/lib.rs` mod tests
+4. Update integration tests in `tests/integration_test.rs`
+5. Update doc comment
+6. Run `cargo test`
 
 ### Observability Standards
 
-- **Error messages**: Must include context (line numbers for parsing errors, descriptive messages for algorithm errors)
-- **No logging currently**: Tool uses stdout for output, stderr for errors (via `println!` and `eprintln!` if needed)
-- **Exit codes**: Program returns `Ok(())` on success, error on failure (Rust's `Result` handling)
+- **Error messages**: Include context (line numbers for parsing errors)
+- **No logging**: Uses stdout for output, stderr for errors (`println!`, `eprintln!`)
+- **Exit codes**: `Ok(())` on success, error on failure
 
-**Example error message**:
+**Example error**:
+
 ```rust
 // Good: Includes line number
 Err(format!("Line {}: {}", idx + 1, err))
@@ -338,31 +335,6 @@ Err("Parse error".to_string())
 
 ### Required Artifacts
 
-- **Public API documentation**: Doc comments (`///`) on all public functions in `src/lib.rs`
-- **CLI help**: Automatically generated by `clap` via `cargo run -- --help`
-- **Tests**: All functionality covered by tests in `src/lib.rs` mod tests
-- **Examples**: Consider adding `examples/` directory with sample usage if tool grows
-
----
-
-## Quick Reference
-
-**Key files**:
-- `src/main.rs` - CLI entry point
-- `src/lib.rs` - Core library and tests
-- `Cargo.toml` - Dependencies and metadata
-
-**Key commands**:
-- `cargo fmt` - Format code
-- `cargo clippy` - Lint code
-- `cargo test` - Run tests
-- `cargo build` - Build project
-- `cargo run -- --input <file>` - Run CLI tool
-
-**Key functions**:
-- `parse_ipv4_nets()` - Parse CIDR input
-- `merge_ipv4_nets()` - Merge networks
-
-**Key types**:
-- `Ipv4Net` - CIDR network representation (from `ipnet` crate)
-
+- **Public API docs**: Doc comments (`///`) on all public functions in `src/lib.rs`
+- **CLI help**: Auto-generated by `clap` via `cargo run -- --help`
+- **Tests**: Coverage in `src/lib.rs` mod tests (unit) and `tests/integration_test.rs` (integration)

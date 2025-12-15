@@ -1,0 +1,27 @@
+# Configuration for cargo-nextest
+# See https://nexte.st/book/configuration.html
+
+[profile.default]
+# Retry flaky tests up to 3 times
+retries = 3
+
+# Test timeout (default is 60s, increase for slow tests)
+test-timeout = "300s"
+
+# Number of threads to use (0 = use all available cores)
+threads = 0
+
+# Output format
+output = { type = "summary", verbosity = "normal" }
+
+# Fail fast: stop at first failure (useful for CI)
+# fail-fast = true
+
+[profile.ci]
+# CI-specific profile
+inherit = "default"
+# In CI, we want to see all output
+output = { type = "summary", verbosity = "normal" }
+# Don't fail fast in CI - run all tests to get full coverage
+fail-fast = false
+

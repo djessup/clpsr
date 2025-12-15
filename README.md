@@ -39,8 +39,10 @@ that includes the line number.
 - `-t, --tolerance <N>`: Maximum number of extra addresses allowed when merging
   CIDRs (default: 0). When set to N > 0, the algorithm may merge networks even
   if the resulting supernet covers addresses outside the original set, as long
-  as the added address count ≤ N. See
-  [Tolerance-based merging](#tolerance-based-merging) for details.
+  as the added address count ≤ N. Can be specified as an integer (e.g., `512`) or
+  a bit mask size (e.g., `/22`). Bit mask sizes are converted to the equivalent
+  number of addresses (e.g., `/22` = 1024 addresses, `/16` = 65536 addresses).
+  See [Tolerance-based merging](#tolerance-based-merging) for details.
 - `-h, --help`: Show usage help.
 - `-V, --version`: Show the current version.
 
@@ -90,6 +92,10 @@ echo -e "10.0.0.0/24\n10.0.2.0/24" | clpsr
 
 # With tolerance >= 512: can merge into /22 (adds 512 addresses)
 echo -e "10.0.0.0/24\n10.0.2.0/24" | clpsr --tolerance 512
+# 10.0.0.0/22
+
+# Using bit mask format: /22 = 1024 addresses (equivalent to --tolerance 1024)
+echo -e "10.0.0.0/24\n10.0.2.0/24" | clpsr --tolerance /22
 # 10.0.0.0/22
 ```
 
@@ -159,6 +165,64 @@ Output (tolerance 512):
 ```text
 10.10.0.0/22
 ```
+
+## Development
+
+### Running tests
+
+The project uses [`cargo-nextest`](https://nexte.st/) for faster test execution and better output. Nextest provides:
+
+- **Faster test execution**: Parallel test running with better resource utilization
+- **Better output**: Clearer test results with better formatting and progress indicators
+- **Test retries**: Automatic retry of flaky tests (configured in `nextest.toml`)
+- **JUnit XML reports**: For CI/CD integration
+
+```bash
+# Install nextest (if not already installed)
+cargo install cargo-nextest
+
+# Run all tests with nextest
+cargo nextest run
+
+# Run only unit tests
+cargo nextest run --lib
+
+# Run only integration tests
+cargo nextest run --test integration_test
+
+# Run tests with specific profile
+cargo nextest run --profile ci
+
+# You can also use the standard cargo test command
+cargo test
+```
+
+### Code coverage
+
+The project uses `cargo-llvm-cov` for code coverage reporting. To generate coverage reports locally:
+
+```bash
+# Install cargo-llvm-cov
+cargo install cargo-llvm-cov
+
+# Generate coverage report (LCOV format)
+cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+
+# Generate HTML coverage report
+cargo llvm-cov --all-features --workspace --html --output-dir coverage
+```
+
+Coverage reports are automatically generated in CI and uploaded as artifacts. Coverage data is also sent to Codecov (if configured) for tracking coverage trends over time.
+
+### Benchmarks
+
+Run benchmarks with:
+
+```bash
+cargo bench
+```
+
+Benchmark results are stored in `target/criterion/` and include HTML reports.
 
 ## Troubleshooting
 
