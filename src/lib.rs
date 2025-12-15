@@ -128,6 +128,7 @@ pub(crate) fn network_covers(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
 }
 
 #[cfg(not(test))]
+#[allow(dead_code)]
 fn network_covers(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
     network_covers_impl(supernet, subnet)
 }
