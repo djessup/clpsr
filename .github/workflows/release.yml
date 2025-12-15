@@ -11,7 +11,7 @@ env:
 
 jobs:
   build:
-    if: hashFiles('**/Cargo.toml') != ''
+    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
