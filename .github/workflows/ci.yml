@@ -51,7 +51,7 @@ jobs:
             ${{ runner.os }}-nextest-
 
       - name: Run tests with nextest
-        run: cargo nextest run --all-features --workspace --profile ci
+        run: cargo nextest run --all-features --workspace
 
       - name: Generate coverage report with nextest
         run: cargo llvm-cov nextest --all-features --workspace --lcov --output-path lcov.info
