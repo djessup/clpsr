@@ -21,3 +21,15 @@ harness = false
 [[bench]]
 name = "merge_bench"
 harness = false
+
+[profile.release]
+# Maximum optimization level
+opt-level = 3
+# Link-time optimization for better performance
+lto = "thin"
+# Single codegen unit for better optimization (slower compile time)
+codegen-units = 1
+# Strip debug symbols to reduce binary size
+strip = true
+# Enable overflow checks in release mode (can disable for max performance)
+overflow-checks = false

@@ -111,6 +111,7 @@ fn test_end_to_end_complex_scenario() {
     assert!(merged_strs.contains(&"172.16.0.0/16".to_string()));
 }
 
+// TODO: Test the compiled binary instead of using "cargo run"
 #[test]
 fn test_cli_execution() {
     // Test that the CLI binary can be executed
@@ -122,10 +123,11 @@ fn test_cli_execution() {
     assert!(output.status.success() || !output.stderr.is_empty());
 }
 
+// TODO: Test the compiled binary instead of using "cargo run"
 #[test]
 fn test_cli_with_stdin() {
     use std::io::Write;
-    
+
     let mut child = Command::new("cargo")
         .args(&["run", "--"])
         .stdin(std::process::Stdio::piped())
@@ -141,10 +143,9 @@ fn test_cli_with_stdin() {
 
     let output = child.wait_with_output().expect("Failed to read output");
     let _stdout = str::from_utf8(&output.stdout).unwrap_or("");
-    
-    // Note: This test may fail if cargo run requires compilation
-    // In a real scenario, you'd test the compiled binary directly
+
+
+
     // Just verify the command can be executed
     assert!(output.status.code().is_some());
 }
-
