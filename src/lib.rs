@@ -70,6 +70,17 @@ pub fn merge_ipv4_nets(nets: Vec<Ipv4Net>, tolerance: u64) -> Vec<Ipv4Net> {
     normalized
 }
 
+#[cfg(test)]
+pub(crate) fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) {
+    nets.sort_by(|a, b| {
+        u32::from(a.addr())
+            .cmp(&u32::from(b.addr()))
+            .then(a.prefix_len().cmp(&b.prefix_len()))
+    });
+    nets.dedup();
+}
+
+#[cfg(not(test))]
 fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) {
     nets.sort_by(|a, b| {
         u32::from(a.addr())
@@ -79,7 +90,17 @@ fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) {
     nets.dedup();
 }
 
+#[cfg(test)]
+pub(crate) fn remove_covered_nets(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
+    remove_covered_nets_impl(nets)
+}
+
+#[cfg(not(test))]
 fn remove_covered_nets(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
+    remove_covered_nets_impl(nets)
+}
+
+fn remove_covered_nets_impl(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
     if nets.is_empty() {
         return (nets, false);
     }
@@ -89,7 +110,7 @@ fn remove_covered_nets(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
 
     for net in nets.into_iter().skip(1) {
         if let Some(last) = compacted.last()
-            && network_covers(last, &net)
+            && network_covers_impl(last, &net)
         {
             continue;
         }
@@ -101,7 +122,17 @@ fn remove_covered_nets(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
     (compacted, removed_any)
 }
 
+#[cfg(test)]
+pub(crate) fn network_covers(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
+    network_covers_impl(supernet, subnet)
+}
+
+#[cfg(not(test))]
 fn network_covers(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
+    network_covers_impl(supernet, subnet)
+}
+
+fn network_covers_impl(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
     if supernet.prefix_len() > subnet.prefix_len() {
         return false;
     }
@@ -158,7 +189,17 @@ fn try_merge_with_tolerance(a: &Ipv4Net, b: &Ipv4Net, tolerance: u64) -> Option<
 
 /// Attempts an exact (lossless) merge of two networks.
 /// Only succeeds if networks are adjacent with identical prefix lengths.
+#[cfg(test)]
+pub(crate) fn try_merge_exact(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
+    try_merge_exact_impl(a, b)
+}
+
+#[cfg(not(test))]
 fn try_merge_exact(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
+    try_merge_exact_impl(a, b)
+}
+
+fn try_merge_exact_impl(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     if a.prefix_len() != b.prefix_len() || a.prefix_len() == 0 {
         return None;
     }
@@ -181,7 +222,17 @@ fn try_merge_exact(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
 
 /// Finds the minimal supernet that covers both networks.
 /// Returns None if no such supernet exists (shouldn't happen for valid IPv4 networks).
+#[cfg(test)]
+pub(crate) fn find_covering_supernet(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
+    find_covering_supernet_impl(a, b)
+}
+
+#[cfg(not(test))]
 fn find_covering_supernet(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
+    find_covering_supernet_impl(a, b)
+}
+
+fn find_covering_supernet_impl(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     let a_start = u32::from(a.network());
     let a_end = u32::from(a.broadcast());
     let b_start = u32::from(b.network());
@@ -213,12 +264,28 @@ fn find_covering_supernet(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
 }
 
 /// Returns the number of addresses in a network.
+#[cfg(test)]
+pub(crate) fn network_address_count(net: &Ipv4Net) -> u64 {
+    1u64 << (32 - net.prefix_len())
+}
+
+#[cfg(not(test))]
 fn network_address_count(net: &Ipv4Net) -> u64 {
     1u64 << (32 - net.prefix_len())
 }
 
 /// Calculates the number of overlapping addresses between two networks.
+#[cfg(test)]
+pub(crate) fn network_overlap(a: &Ipv4Net, b: &Ipv4Net) -> u64 {
+    network_overlap_impl(a, b)
+}
+
+#[cfg(not(test))]
 fn network_overlap(a: &Ipv4Net, b: &Ipv4Net) -> u64 {
+    network_overlap_impl(a, b)
+}
+
+fn network_overlap_impl(a: &Ipv4Net, b: &Ipv4Net) -> u64 {
     let a_start = u32::from(a.network());
     let a_end = u32::from(a.broadcast());
     let b_start = u32::from(b.network());
@@ -236,8 +303,93 @@ fn network_overlap(a: &Ipv4Net, b: &Ipv4Net) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::merge_ipv4_nets;
+    use super::*;
+    use std::io::Cursor;
     use ipnet::Ipv4Net;
+
+    // ========== parse_ipv4_nets tests ==========
+
+    #[test]
+    fn parse_ipv4_nets_parses_valid_cidrs() {
+        let input = "10.0.0.0/24\n192.168.1.0/24\n172.16.0.0/16";
+        let reader = Cursor::new(input);
+        let result = parse_ipv4_nets(reader).unwrap();
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "10.0.0.0/24".parse::<Ipv4Net>().unwrap());
+        assert_eq!(result[1], "192.168.1.0/24".parse::<Ipv4Net>().unwrap());
+        assert_eq!(result[2], "172.16.0.0/16".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn parse_ipv4_nets_ignores_empty_lines() {
+        let input = "10.0.0.0/24\n\n192.168.1.0/24\n  \n\t\n172.16.0.0/16";
+        let reader = Cursor::new(input);
+        let result = parse_ipv4_nets(reader).unwrap();
+
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn parse_ipv4_nets_trims_whitespace() {
+        let input = "  10.0.0.0/24  \n\t192.168.1.0/24\t";
+        let reader = Cursor::new(input);
+        let result = parse_ipv4_nets(reader).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "10.0.0.0/24".parse::<Ipv4Net>().unwrap());
+        assert_eq!(result[1], "192.168.1.0/24".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn parse_ipv4_nets_returns_error_for_invalid_cidr() {
+        let input = "10.0.0.0/24\ninvalid\n192.168.1.0/24";
+        let reader = Cursor::new(input);
+        let result = parse_ipv4_nets(reader);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Line 2"));
+    }
+
+    #[test]
+    fn parse_ipv4_nets_handles_empty_input() {
+        let input = "";
+        let reader = Cursor::new(input);
+        let result = parse_ipv4_nets(reader).unwrap();
+
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn parse_ipv4_nets_handles_only_empty_lines() {
+        let input = "\n\n  \n\t\n";
+        let reader = Cursor::new(input);
+        let result = parse_ipv4_nets(reader).unwrap();
+
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn parse_ipv4_nets_handles_malformed_ip() {
+        let input = "10.0.0.0/24\n999.999.999.999/24\n192.168.1.0/24";
+        let reader = Cursor::new(input);
+        let result = parse_ipv4_nets(reader);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Line 2"));
+    }
+
+    #[test]
+    fn parse_ipv4_nets_handles_invalid_prefix_length() {
+        let input = "10.0.0.0/24\n192.168.1.0/33\n172.16.0.0/16";
+        let reader = Cursor::new(input);
+        let result = parse_ipv4_nets(reader);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Line 2"));
+    }
+
+    // ========== merge_ipv4_nets tests ==========
 
     #[test]
     fn merges_adjacent_subnets() {
@@ -388,5 +540,336 @@ mod tests {
         let merged = merge_ipv4_nets(nets, 512);
         // Should have 2 networks (one merged pair + one remaining)
         assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_empty_input() {
+        let nets = vec![];
+        let merged = merge_ipv4_nets(nets, 0);
+        assert_eq!(merged.len(), 0);
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_single_network() {
+        let nets = vec!["10.0.0.0/24".parse::<Ipv4Net>().unwrap()];
+        let merged = merge_ipv4_nets(nets, 0);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], "10.0.0.0/24".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_unsorted_input() {
+        let nets = vec![
+            "10.0.2.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.1.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        let merged = merge_ipv4_nets(nets, 0);
+        // 10.0.0.0/24 and 10.0.1.0/24 merge into 10.0.0.0/23
+        // 10.0.2.0/24 remains separate (not adjacent to the /23)
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0], "10.0.0.0/23".parse::<Ipv4Net>().unwrap());
+        assert_eq!(merged[1], "10.0.2.0/24".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_multiple_adjacent_groups() {
+        let nets = vec![
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.1.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.4.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.5.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        let merged = merge_ipv4_nets(nets, 0);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0], "10.0.0.0/23".parse::<Ipv4Net>().unwrap());
+        assert_eq!(merged[1], "10.0.4.0/23".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_nested_subnets() {
+        let nets = vec![
+            "10.0.0.0/16".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.1.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.2.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        let merged = merge_ipv4_nets(nets, 0);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], "10.0.0.0/16".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_complex_merging_scenario() {
+        // Test multiple iterations: merge adjacent, then merge the results
+        let nets = vec![
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.1.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.2.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.3.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        let merged = merge_ipv4_nets(nets, 0);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], "10.0.0.0/22".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn merge_ipv4_nets_preserves_order_after_sorting() {
+        let nets = vec![
+            "192.168.1.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "172.16.0.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        let merged = merge_ipv4_nets(nets, 0);
+        assert_eq!(merged.len(), 3);
+        // Should be sorted by network address
+        assert!(u32::from(merged[0].addr()) < u32::from(merged[1].addr()));
+        assert!(u32::from(merged[1].addr()) < u32::from(merged[2].addr()));
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_tolerance_edge_cases() {
+        // Test tolerance = 0 (exact merge only)
+        let nets = vec![
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.2.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        let merged = merge_ipv4_nets(nets.clone(), 0);
+        assert_eq!(merged.len(), 2);
+
+        // Test tolerance = 511 (just below threshold)
+        let merged = merge_ipv4_nets(nets.clone(), 511);
+        assert_eq!(merged.len(), 2);
+
+        // Test tolerance = 512 (at threshold)
+        let merged = merge_ipv4_nets(nets.clone(), 512);
+        assert_eq!(merged.len(), 1);
+
+        // Test tolerance = u64::MAX (very large)
+        let merged = merge_ipv4_nets(nets, u64::MAX);
+        assert_eq!(merged.len(), 1);
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_very_small_networks() {
+        let nets = vec![
+            "10.0.0.0/32".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.1/32".parse::<Ipv4Net>().unwrap(),
+        ];
+        let merged = merge_ipv4_nets(nets, 0);
+        // Two adjacent /32s can merge into a /31 which covers exactly 2 addresses
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], "10.0.0.0/31".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn merge_ipv4_nets_handles_very_large_networks() {
+        let nets = vec![
+            "0.0.0.0/1".parse::<Ipv4Net>().unwrap(),
+            "128.0.0.0/1".parse::<Ipv4Net>().unwrap(),
+        ];
+        let merged = merge_ipv4_nets(nets, 0);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0], "0.0.0.0/0".parse::<Ipv4Net>().unwrap());
+    }
+
+    // ========== Helper function tests (using internal visibility) ==========
+
+    #[test]
+    fn test_try_merge_exact_adjacent_same_prefix() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.1.0/24".parse::<Ipv4Net>().unwrap();
+        let result = try_merge_exact(&a, &b);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "10.0.0.0/23".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn test_try_merge_exact_different_prefix_lengths() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.1.0/23".parse::<Ipv4Net>().unwrap();
+        let result = try_merge_exact(&a, &b);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_merge_exact_non_adjacent() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.2.0/24".parse::<Ipv4Net>().unwrap();
+        let result = try_merge_exact(&a, &b);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_merge_exact_prefix_zero() {
+        let a = "10.0.0.0/0".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.1.0/0".parse::<Ipv4Net>().unwrap();
+        let result = try_merge_exact(&a, &b);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_network_covers_supernet_covers_subnet() {
+        let supernet = "10.0.0.0/16".parse::<Ipv4Net>().unwrap();
+        let subnet = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        assert!(network_covers(&supernet, &subnet));
+    }
+
+    #[test]
+    fn test_network_covers_same_network() {
+        let net = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        assert!(network_covers(&net, &net));
+    }
+
+    #[test]
+    fn test_network_covers_subnet_does_not_cover_supernet() {
+        let subnet = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let supernet = "10.0.0.0/16".parse::<Ipv4Net>().unwrap();
+        assert!(!network_covers(&subnet, &supernet));
+    }
+
+    #[test]
+    fn test_network_covers_disjoint_networks() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.2.0/24".parse::<Ipv4Net>().unwrap();
+        assert!(!network_covers(&a, &b));
+        assert!(!network_covers(&b, &a));
+    }
+
+    #[test]
+    fn test_network_covers_partial_overlap() {
+        let a = "10.0.0.0/23".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.1.0/24".parse::<Ipv4Net>().unwrap();
+        assert!(network_covers(&a, &b));
+        assert!(!network_covers(&b, &a));
+    }
+
+    #[test]
+    fn test_find_covering_supernet_adjacent_networks() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.2.0/24".parse::<Ipv4Net>().unwrap();
+        let result = find_covering_supernet(&a, &b);
+        assert!(result.is_some());
+        // Should find /22 that covers both
+        assert!(result.unwrap().prefix_len() <= 22);
+    }
+
+    #[test]
+    fn test_find_covering_supernet_overlapping_networks() {
+        let a = "10.0.0.0/23".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.1.0/24".parse::<Ipv4Net>().unwrap();
+        let result = find_covering_supernet(&a, &b);
+        assert!(result.is_some());
+        // Should find /23 that covers both
+        assert_eq!(result.unwrap().prefix_len(), 23);
+    }
+
+    #[test]
+    fn test_find_covering_supernet_disjoint_networks() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let b = "192.168.0.0/24".parse::<Ipv4Net>().unwrap();
+        let result = find_covering_supernet(&a, &b);
+        assert!(result.is_some());
+        // Should find a very large supernet (likely /0)
+        assert_eq!(result.unwrap().prefix_len(), 0);
+    }
+
+    #[test]
+    fn test_network_address_count() {
+        assert_eq!(network_address_count(&"10.0.0.0/32".parse::<Ipv4Net>().unwrap()), 1);
+        assert_eq!(network_address_count(&"10.0.0.0/31".parse::<Ipv4Net>().unwrap()), 2);
+        assert_eq!(network_address_count(&"10.0.0.0/24".parse::<Ipv4Net>().unwrap()), 256);
+        assert_eq!(network_address_count(&"10.0.0.0/16".parse::<Ipv4Net>().unwrap()), 65536);
+        assert_eq!(network_address_count(&"10.0.0.0/8".parse::<Ipv4Net>().unwrap()), 16777216);
+        assert_eq!(network_address_count(&"0.0.0.0/0".parse::<Ipv4Net>().unwrap()), 4294967296);
+    }
+
+    #[test]
+    fn test_network_overlap_no_overlap() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.2.0/24".parse::<Ipv4Net>().unwrap();
+        assert_eq!(network_overlap(&a, &b), 0);
+    }
+
+    #[test]
+    fn test_network_overlap_full_overlap() {
+        let a = "10.0.0.0/16".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        assert_eq!(network_overlap(&a, &b), 256);
+    }
+
+    #[test]
+    fn test_network_overlap_partial_overlap() {
+        let a = "10.0.0.0/23".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.1.0/24".parse::<Ipv4Net>().unwrap();
+        assert_eq!(network_overlap(&a, &b), 256);
+    }
+
+    #[test]
+    fn test_network_overlap_adjacent_no_overlap() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        let b = "10.0.1.0/24".parse::<Ipv4Net>().unwrap();
+        assert_eq!(network_overlap(&a, &b), 0);
+    }
+
+    #[test]
+    fn test_network_overlap_same_network() {
+        let a = "10.0.0.0/24".parse::<Ipv4Net>().unwrap();
+        assert_eq!(network_overlap(&a, &a), 256);
+    }
+
+    #[test]
+    fn test_remove_covered_nets_empty() {
+        let (result, changed) = remove_covered_nets(vec![]);
+        assert_eq!(result.len(), 0);
+        assert!(!changed);
+    }
+
+    #[test]
+    fn test_remove_covered_nets_no_covered() {
+        let nets = vec![
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.2.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        let (result, changed) = remove_covered_nets(nets);
+        assert_eq!(result.len(), 2);
+        assert!(!changed);
+    }
+
+    #[test]
+    fn test_remove_covered_nets_removes_covered() {
+        let nets = vec![
+            "10.0.0.0/16".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.1.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        let (result, changed) = remove_covered_nets(nets);
+        assert_eq!(result.len(), 1);
+        assert!(changed);
+        assert_eq!(result[0], "10.0.0.0/16".parse::<Ipv4Net>().unwrap());
+    }
+
+    #[test]
+    fn test_sort_and_dedup_removes_duplicates() {
+        let mut nets = vec![
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "192.168.1.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+        sort_and_dedup(&mut nets);
+        assert_eq!(nets.len(), 2);
+    }
+
+    #[test]
+    fn test_sort_and_dedup_sorts_by_address_then_prefix() {
+        let mut nets = vec![
+            "10.0.1.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.0/16".parse::<Ipv4Net>().unwrap(),
+        ];
+        sort_and_dedup(&mut nets);
+        assert_eq!(nets[0], "10.0.0.0/16".parse::<Ipv4Net>().unwrap());
+        assert_eq!(nets[1], "10.0.0.0/24".parse::<Ipv4Net>().unwrap());
+        assert_eq!(nets[2], "10.0.1.0/24".parse::<Ipv4Net>().unwrap());
     }
 }
