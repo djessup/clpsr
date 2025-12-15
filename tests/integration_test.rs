@@ -146,7 +146,7 @@ fn test_end_to_end_complex_scenario() {
 fn test_cli_execution() {
     // Test that the CLI binary can be executed
     let output = Command::new("cargo")
-        .args(&["run", "--", "--help"])
+        .args(["run", "--", "--help"])
         .output()
         .expect("Failed to execute cargo run");
 
@@ -159,7 +159,7 @@ fn test_cli_with_stdin() {
     use std::io::Write;
 
     let mut child = Command::new("cargo")
-        .args(&["run", "--"])
+        .args(["run", "--"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -183,7 +183,7 @@ fn test_cli_with_tolerance_bit_mask() {
     use std::io::Write;
 
     let mut child = Command::new("cargo")
-        .args(&["run", "--", "--tolerance", "/22"])
+        .args(["run", "--", "--tolerance", "/22"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -208,7 +208,7 @@ fn test_cli_with_tolerance_bit_mask() {
 fn test_cli_with_tolerance_bit_mask_invalid() {
     // Test that invalid bit mask format is rejected
     let output = Command::new("cargo")
-        .args(&["run", "--", "--tolerance", "/33"])
+        .args(["run", "--", "--tolerance", "/33"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
