@@ -1,2 +1,12 @@
 /target
 cidrs.txt
+
+# Coverage reports
+lcov.info
+coverage/
+*.gcda
+*.gcno
+*.profdata
+
+# Nextest
+.nextest/
