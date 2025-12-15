@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use std::io::Cursor;
 use clpsr::parse_ipv4_nets;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use std::io::Cursor;
 
 fn generate_test_data(size: usize) -> String {
     let mut data = String::new();
@@ -75,5 +75,3 @@ criterion_group!(
     bench_parse_with_empty_lines
 );
 criterion_main!(benches);
-
-

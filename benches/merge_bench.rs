@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use clpsr::merge_ipv4_nets;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use ipnet::Ipv4Net;
 
 fn generate_adjacent_networks(size: usize) -> Vec<Ipv4Net> {
@@ -137,5 +137,3 @@ criterion_group!(
     bench_merge_iterative_scenario
 );
 criterion_main!(benches);
-
-

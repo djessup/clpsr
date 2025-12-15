@@ -304,8 +304,8 @@ fn network_overlap_impl(a: &Ipv4Net, b: &Ipv4Net) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
     use ipnet::Ipv4Net;
+    use std::io::Cursor;
 
     // ========== parse_ipv4_nets tests ==========
 
@@ -776,12 +776,30 @@ mod tests {
 
     #[test]
     fn test_network_address_count() {
-        assert_eq!(network_address_count(&"10.0.0.0/32".parse::<Ipv4Net>().unwrap()), 1);
-        assert_eq!(network_address_count(&"10.0.0.0/31".parse::<Ipv4Net>().unwrap()), 2);
-        assert_eq!(network_address_count(&"10.0.0.0/24".parse::<Ipv4Net>().unwrap()), 256);
-        assert_eq!(network_address_count(&"10.0.0.0/16".parse::<Ipv4Net>().unwrap()), 65536);
-        assert_eq!(network_address_count(&"10.0.0.0/8".parse::<Ipv4Net>().unwrap()), 16777216);
-        assert_eq!(network_address_count(&"0.0.0.0/0".parse::<Ipv4Net>().unwrap()), 4294967296);
+        assert_eq!(
+            network_address_count(&"10.0.0.0/32".parse::<Ipv4Net>().unwrap()),
+            1
+        );
+        assert_eq!(
+            network_address_count(&"10.0.0.0/31".parse::<Ipv4Net>().unwrap()),
+            2
+        );
+        assert_eq!(
+            network_address_count(&"10.0.0.0/24".parse::<Ipv4Net>().unwrap()),
+            256
+        );
+        assert_eq!(
+            network_address_count(&"10.0.0.0/16".parse::<Ipv4Net>().unwrap()),
+            65536
+        );
+        assert_eq!(
+            network_address_count(&"10.0.0.0/8".parse::<Ipv4Net>().unwrap()),
+            16777216
+        );
+        assert_eq!(
+            network_address_count(&"0.0.0.0/0".parse::<Ipv4Net>().unwrap()),
+            4294967296
+        );
     }
 
     #[test]

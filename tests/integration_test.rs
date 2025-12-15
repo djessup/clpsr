@@ -67,6 +67,36 @@ fn test_end_to_end_with_tolerance() {
 }
 
 #[test]
+fn test_end_to_end_with_tolerance_bit_mask() {
+    let input = "10.0.0.0/24\n10.0.2.0/24";
+    let reader = Cursor::new(input);
+    let nets = parse_ipv4_nets(reader).unwrap();
+
+    // /22 = 2^(32-22) = 2^10 = 1024 addresses, which is >= 512 needed
+    let merged_with_tol = merge_ipv4_nets(nets.clone(), 1024);
+    assert_eq!(merged_with_tol.len(), 1);
+
+    // /23 = 2^(32-23) = 2^9 = 512 addresses, exactly what's needed
+    let merged_with_tol_exact = merge_ipv4_nets(nets.clone(), 512);
+    assert_eq!(merged_with_tol_exact.len(), 1);
+
+    // /24 = 2^(32-24) = 2^8 = 256 addresses, which is < 512 needed
+    let merged_with_tol_too_small = merge_ipv4_nets(nets, 256);
+    assert_eq!(merged_with_tol_too_small.len(), 2);
+}
+
+#[test]
+fn test_end_to_end_with_tolerance_bit_mask_large() {
+    let input = "10.0.0.0/24\n10.0.2.0/24";
+    let reader = Cursor::new(input);
+    let nets = parse_ipv4_nets(reader).unwrap();
+
+    // /16 = 2^(32-16) = 2^16 = 65536 addresses, should definitely merge
+    let merged_with_tol = merge_ipv4_nets(nets, 65536);
+    assert_eq!(merged_with_tol.len(), 1);
+}
+
+#[test]
 fn test_end_to_end_large_input() {
     // Generate a large input with many adjacent networks
     let mut input = String::new();
@@ -144,8 +174,49 @@ fn test_cli_with_stdin() {
     let output = child.wait_with_output().expect("Failed to read output");
     let _stdout = str::from_utf8(&output.stdout).unwrap_or("");
 
-
-
     // Just verify the command can be executed
     assert!(output.status.code().is_some());
+}
+
+#[test]
+fn test_cli_with_tolerance_bit_mask() {
+    use std::io::Write;
+
+    let mut child = Command::new("cargo")
+        .args(&["run", "--", "--tolerance", "/22"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn cargo run");
+
+    // Write input to stdin: two /24s separated by one /24 gap
+    // This requires tolerance >= 512 to merge
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(b"10.0.0.0/24\n10.0.2.0/24").ok();
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+    let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim();
+
+    // Should merge into /22 with tolerance /22 (1024 addresses)
+    assert!(output.status.success());
+    assert_eq!(stdout, "10.0.0.0/22");
+}
+
+#[test]
+fn test_cli_with_tolerance_bit_mask_invalid() {
+    // Test that invalid bit mask format is rejected
+    let output = Command::new("cargo")
+        .args(&["run", "--", "--tolerance", "/33"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .expect("Failed to execute cargo run");
+
+    // Should fail with error about invalid prefix length
+    assert!(!output.status.success());
+    let stderr = str::from_utf8(&output.stderr).unwrap_or("");
+    assert!(stderr.contains("Prefix length must be between 0 and 32"));
 }
