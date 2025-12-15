@@ -53,7 +53,9 @@ pub fn merge_ipv4_nets(nets: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
         }
 
         sort_and_dedup(&mut merged);
-        normalized = merged;
+        let (compacted, removed_subnets) = remove_covered_nets(merged);
+        changed |= removed_subnets;
+        normalized = compacted;
     }
 
     normalized
@@ -66,6 +68,42 @@ fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) {
             .then(a.prefix_len().cmp(&b.prefix_len()))
     });
     nets.dedup();
+}
+
+fn remove_covered_nets(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
+    if nets.is_empty() {
+        return (nets, false);
+    }
+
+    let mut compacted = Vec::with_capacity(nets.len());
+    compacted.push(nets[0]);
+
+    for net in nets.into_iter().skip(1) {
+        if let Some(last) = compacted.last() {
+            if network_covers(last, &net) {
+                continue;
+            }
+        }
+
+        compacted.push(net);
+    }
+
+    let removed_any = compacted.len() < compacted.capacity();
+    (compacted, removed_any)
+}
+
+fn network_covers(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
+    if supernet.prefix_len() > subnet.prefix_len() {
+        return false;
+    }
+
+    let super_start = u32::from(supernet.network());
+    let super_end = u32::from(supernet.broadcast());
+
+    let sub_start = u32::from(subnet.network());
+    let sub_end = u32::from(subnet.broadcast());
+
+    super_start <= sub_start && super_end >= sub_end
 }
 
 fn try_merge(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
@@ -142,14 +180,27 @@ mod tests {
     }
 
     #[test]
+    fn removes_covered_subnets() {
+        let nets = vec![
+            "10.0.0.0/23".parse::<Ipv4Net>().unwrap(),
+            "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
+            "10.0.1.0/24".parse::<Ipv4Net>().unwrap(),
+        ];
+      
+        let merged = merge_ipv4_nets(nets);
+      
+        assert_eq!(merged, vec!["10.0.0.0/23".parse::<Ipv4Net>().unwrap()]);
+    }
+  
+    #[test]
     fn merges_largest_adjacent_prefixes() {
         let nets = vec![
             "0.0.0.0/1".parse::<Ipv4Net>().unwrap(),
             "128.0.0.0/1".parse::<Ipv4Net>().unwrap(),
         ];
-
+      
         let merged = merge_ipv4_nets(nets);
-
+      
         assert_eq!(merged, vec!["0.0.0.0/0".parse::<Ipv4Net>().unwrap()]);
     }
 }
