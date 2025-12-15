@@ -10,9 +10,8 @@ use clpsr::{merge_ipv4_nets, parse_ipv4_nets};
 /// Accepts either an integer (e.g., "512") or a bit mask size (e.g., "/16").
 /// Bit mask sizes are converted to the equivalent number of addresses.
 fn parse_tolerance(s: &str) -> Result<u64, String> {
-    if s.starts_with('/') {
+    if let Some(prefix_len_str) = s.strip_prefix('/') {
         // Parse as bit mask size (e.g., "/16")
-        let prefix_len_str = &s[1..];
         let prefix_len: u8 = prefix_len_str
             .parse()
             .map_err(|_| format!("Invalid prefix length: {prefix_len_str}"))?;
