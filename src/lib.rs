@@ -112,9 +112,9 @@ fn try_merge(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     }
 
     let prefix = a.prefix_len();
-    let block_size = 1u32 << (32 - prefix);
-    let a_net = u32::from(a.addr());
-    let b_net = u32::from(b.addr());
+    let block_size = 1u64 << (32 - prefix);
+    let a_net = u32::from(a.addr()) as u64;
+    let b_net = u32::from(b.addr()) as u64;
 
     if a_net % (block_size * 2) != 0 {
         return None;
@@ -186,9 +186,21 @@ mod tests {
             "10.0.0.0/24".parse::<Ipv4Net>().unwrap(),
             "10.0.1.0/24".parse::<Ipv4Net>().unwrap(),
         ];
-
+      
         let merged = merge_ipv4_nets(nets);
-
+      
         assert_eq!(merged, vec!["10.0.0.0/23".parse::<Ipv4Net>().unwrap()]);
+    }
+  
+    #[test]
+    fn merges_largest_adjacent_prefixes() {
+        let nets = vec![
+            "0.0.0.0/1".parse::<Ipv4Net>().unwrap(),
+            "128.0.0.0/1".parse::<Ipv4Net>().unwrap(),
+        ];
+      
+        let merged = merge_ipv4_nets(nets);
+      
+        assert_eq!(merged, vec!["0.0.0.0/0".parse::<Ipv4Net>().unwrap()]);
     }
 }
