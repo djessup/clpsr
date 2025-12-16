@@ -270,3 +270,28 @@ fn test_cli_check_mode_detects_pending_merges() {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn test_cli_check_mode_detects_duplicates() {
+    use std::io::Write;
+
+    let mut child = Command::new("cargo")
+        .args(["run", "--", "--check"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn cargo run");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        // Duplicate entries should cause check mode to fail because the merge would drop them.
+        stdin
+            .write_all(b"10.0.0.0/24\n10.0.0.0/24")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+}

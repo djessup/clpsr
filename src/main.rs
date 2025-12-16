@@ -53,19 +53,15 @@ struct Args {
     check: bool,
 }
 
-fn normalize_and_dedup(mut nets: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
-    // We want check mode to verify semantic equivalence, not just that the list length
-    // stayed the same after merging. Counting entries would miss situations where two
-    // different coverings contain the same number of CIDRs (e.g., a pair of overlapping
-    // /25s versus two disjoint /24s) even though the address space they cover differs.
-    // By canonicalizing order and deduplicating before comparison, we ensure the check
-    // flags only meaningful changes in coverage or optimality.
+fn normalize_for_check(mut nets: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
+    // Check mode must detect any change the merge step would perform, including dropping
+    // duplicates. Sorting provides a stable ordering for comparison while preserving the
+    // original multiplicity so that repeated CIDRs remain visible as a behavioral change.
     nets.sort_by(|a, b| {
         u32::from(a.addr())
             .cmp(&u32::from(b.addr()))
             .then(a.prefix_len().cmp(&b.prefix_len()))
     });
-    nets.dedup();
     nets
 }
 
@@ -82,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let merged = merge_ipv4_nets(nets.clone(), args.tolerance);
 
     if args.check {
-        let normalized_input = normalize_and_dedup(nets);
+        let normalized_input = normalize_for_check(nets);
 
         if normalized_input != merged {
             process::exit(1);
