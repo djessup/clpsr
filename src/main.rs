@@ -54,6 +54,12 @@ struct Args {
 }
 
 fn normalize_and_dedup(mut nets: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
+    // We want check mode to verify semantic equivalence, not just that the list length
+    // stayed the same after merging. Counting entries would miss situations where two
+    // different coverings contain the same number of CIDRs (e.g., a pair of overlapping
+    // /25s versus two disjoint /24s) even though the address space they cover differs.
+    // By canonicalizing order and deduplicating before comparison, we ensure the check
+    // flags only meaningful changes in coverage or optimality.
     nets.sort_by(|a, b| {
         u32::from(a.addr())
             .cmp(&u32::from(b.addr()))
