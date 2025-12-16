@@ -46,8 +46,8 @@ jobs:
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
           echo "Tag version: $TAG_VERSION"
           
-          # Extract version from Cargo.toml
-          CARGO_VERSION=$(grep -E '^version\s*=' Cargo.toml | head -1 | sed -E 's/^version\s*=\s*"([^"]+)".*/\1/')
+          # Extract version from Cargo.toml (handles version = "1.0.0" format)
+          CARGO_VERSION=$(awk -F'"' '/^version\s*=/ {print $2; exit}' Cargo.toml)
           echo "Cargo.toml version: $CARGO_VERSION"
           
           # Compare versions
