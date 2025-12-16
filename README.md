@@ -13,14 +13,12 @@ network-address management tools when you only need quick CIDR aggregation.
 ### Homebrew (macOS and Linux)
 
 ```bash
-brew tap djessup/clpsr
+brew tap djessup/clpsr https://github.com/djessup/clpsr.git
 brew install clpsr
 ```
 
-Or install directly (automatically taps):
-```bash
-brew install djessup/clpsr/clpsr
-```
+> [!NOTE] 
+> I may setup a "proper" tap repo at some point down the road, so consider this a temporary arrangement.
 
 ### Cargo
 
