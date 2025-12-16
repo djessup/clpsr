@@ -47,7 +47,7 @@ jobs:
           echo "Tag version: $TAG_VERSION"
           
           # Extract version from Cargo.toml (handles version = "1.0.0" format)
-          CARGO_VERSION=$(awk -F'"' '/^version\s*=/ {print $2; exit}' Cargo.toml)
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
           echo "Cargo.toml version: $CARGO_VERSION"
           
           # Compare versions
