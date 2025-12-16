@@ -8,13 +8,13 @@ class Clpsr < Formula
       url "https://github.com/djessup/clpsr/releases/download/<RELEASE_VERSION>/clpsr-macos-x86_64.tar.gz"
       sha256 "<SHA256_FOR_X86_64>"
     else
-      url "https://github.com/djessup/clpsr/releases/download/<RELEASE_VERSION>/clpsr-macos-arm64.tar.gz"
+      url "https://github.com/djessup/clpsr/releases/download/<RELEASE_VERSION>/clpsr-macos-aarch64.tar.gz"
       sha256 "<SHA256_FOR_ARM64>"
     end
   end
 
   on_linux do
-    url "https://github.com/djessup/clpsr/releases/download/<RELEASE_VERSION>/clpsr-ubuntu-latest.tar.gz"
+    url "https://github.com/djessup/clpsr/releases/download/<RELEASE_VERSION>/clpsr-linux-amd64.tar.gz"
     sha256 "<SHA256_FOR_LINUX>"
   end
 

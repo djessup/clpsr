@@ -22,12 +22,12 @@ jobs:
             arch: amd64
           - os: macos-latest
             archive: tar.gz
-            bin_path: target/release/clpsr
+            bin_path: target/x86_64-apple-darwin/release/clpsr
             artifact_name: macos-x86_64
             arch: x86_64
           - os: macos-latest
             archive: tar.gz
-            bin_path: target/release/clpsr
+            bin_path: target/aarch64-apple-darwin/release/clpsr
             artifact_name: macos-aarch64
             arch: aarch64
           - os: windows-latest
@@ -44,6 +44,15 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install cross-compilation targets
+        if: matrix.os == 'macos-latest'
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            rustup target add x86_64-apple-darwin
+          elif [ "${{ matrix.arch }}" = "aarch64" ]; then
+            rustup target add aarch64-apple-darwin
+          fi
+
       - name: Cache cargo directories
         uses: actions/cache@v4
         with:
@@ -56,14 +65,35 @@ jobs:
             ${{ runner.os }}-${{ matrix.arch || 'default' }}-cargo-release-
 
       - name: Build release binary
-        run: cargo build --all --all-features --release
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            if [ "${{ matrix.arch }}" = "x86_64" ]; then
+              cargo build --all --all-features --release --target x86_64-apple-darwin
+            elif [ "${{ matrix.arch }}" = "aarch64" ]; then
+              cargo build --all --all-features --release --target aarch64-apple-darwin
+            else
+              cargo build --all --all-features --release
+            fi
+          else
+            cargo build --all --all-features --release
+          fi
 
       - name: Archive binary (unix)
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
           artifact="${{ env.BIN_NAME }}-${{ matrix.artifact_name }}.${{ matrix.archive }}"
-          tar czf "$artifact" -C target/release "${{ env.BIN_NAME }}"
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            if [ "${{ matrix.arch }}" = "x86_64" ]; then
+              tar czf "$artifact" -C target/x86_64-apple-darwin/release "${{ env.BIN_NAME }}"
+            elif [ "${{ matrix.arch }}" = "aarch64" ]; then
+              tar czf "$artifact" -C target/aarch64-apple-darwin/release "${{ env.BIN_NAME }}"
+            else
+              tar czf "$artifact" -C target/release "${{ env.BIN_NAME }}"
+            fi
+          else
+            tar czf "$artifact" -C target/release "${{ env.BIN_NAME }}"
+          fi
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
         id: package
 
@@ -235,7 +265,7 @@ jobs:
                   f'sha256 "{sha_linux}"',
                   content
               )
-              # Replace existing checksum on line after ubuntu-latest URL
+              # Replace existing checksum on line after linux-amd64 URL
               content = re.sub(
                   r'(url\s+"[^"]*linux-amd64\.tar\.gz"[^\n]*\n\s+sha256\s+")[a-f0-9]{64}(")',
                   f'\\g<1>{sha_linux}\\g<2>',
