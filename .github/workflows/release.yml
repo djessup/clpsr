@@ -29,7 +29,7 @@ jobs:
             archive: tar.gz
             bin_path: target/release/clpsr
             artifact_name: macos-aarch64
-            arch: aarch64-
+            arch: aarch64
           - os: windows-latest
             archive: zip
             bin_path: target/release/clpsr.exe
@@ -132,7 +132,7 @@ jobs:
           # Find all tar.gz files (macOS and Linux) - search recursively
           MACOS_X86_64=$(find . -name "clpsr-macos-x86_64.tar.gz" -type f | head -1)
           MACOS_AARCH64=$(find . -name "clpsr-macos-aarch64.tar.gz" -type f | head -1)
-          LINUX=$(find . -name "clpsr-linux.tar.gz" -type f | head -1)
+          LINUX=$(find . -name "clpsr-linux-amd64.tar.gz" -type f | head -1)
           
           echo "Found artifacts:"
           echo "  macOS x86_64: ${MACOS_X86_64:-not found}"
@@ -237,7 +237,7 @@ jobs:
               )
               # Replace existing checksum on line after ubuntu-latest URL
               content = re.sub(
-                  r'(url\s+"[^"]*ubuntu-latest\.tar\.gz"[^\n]*\n\s+sha256\s+")[a-f0-9]{64}(")',
+                  r'(url\s+"[^"]*linux-amd64\.tar\.gz"[^\n]*\n\s+sha256\s+")[a-f0-9]{64}(")',
                   f'\\g<1>{sha_linux}\\g<2>',
                   content
               )
