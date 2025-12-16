@@ -17,7 +17,7 @@ brew tap djessup/clpsr https://github.com/djessup/clpsr.git
 brew install clpsr
 ```
 
-> [!NOTE] 
+> [!NOTE]
 > I may setup a "proper" tap repo at some point down the road, so consider this a temporary arrangement.
 
 ### Cargo
