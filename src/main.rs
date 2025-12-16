@@ -8,9 +8,29 @@ use ipnet::Ipv4Net;
 
 use clpsr::{merge_ipv4_nets, parse_ipv4_nets};
 
-/// Parse tolerance value from string.
-/// Accepts either an integer (e.g., "512") or a bit mask size (e.g., "/16").
-/// Bit mask sizes are converted to the equivalent number of addresses.
+/// Parses a tolerance value from a string.
+///
+/// Accepts two formats:
+/// - Integer: A decimal number representing the maximum number of extra addresses (e.g., `"512"`)
+/// - Bit mask: A prefix length in CIDR notation (e.g., `"/16"`), which is converted to the
+///   equivalent number of addresses using the formula `2^(32 - prefix_len)`
+///
+/// # Arguments
+///
+/// * `s` - String to parse as a tolerance value
+///
+/// # Returns
+///
+/// * `Ok(u64)` - The tolerance value as a number of addresses
+/// * `Err(String)` - Error message if parsing fails
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(parse_tolerance("512").unwrap(), 512);
+/// assert_eq!(parse_tolerance("/16").unwrap(), 65536);  // 2^(32-16) = 65536
+/// assert_eq!(parse_tolerance("/24").unwrap(), 256);   // 2^(32-24) = 256
+/// ```
 fn parse_tolerance(s: &str) -> Result<u64, String> {
     if let Some(prefix_len_str) = s.strip_prefix('/') {
         // Parse as bit mask size (e.g., "/16")
@@ -35,17 +55,33 @@ fn parse_tolerance(s: &str) -> Result<u64, String> {
     }
 }
 
+/// Command-line arguments for the CIDR merge utility.
 #[derive(Parser, Debug)]
 #[command(author, version, about = "CIDR merge utility", long_about = None)]
 struct Args {
-    /// Optional path to a file containing CIDRs (one per line). If omitted, stdin is used.
+    /// Optional path to a file containing CIDRs (one per line).
+    ///
+    /// If omitted, CIDRs are read from standard input. Empty lines are ignored.
+    /// Each non-empty line should contain a single IPv4 CIDR block in standard notation
+    /// (e.g., `10.0.0.0/24`).
     #[arg(short, long)]
     input: Option<PathBuf>,
-    /// Maximum number of extra addresses allowed when merging CIDRs. Defaults to 0 (lossless merging only).
-    /// When set to N > 0, the algorithm may merge networks even if the resulting supernet covers
-    /// addresses outside the original set, as long as the added address count ≤ N.
-    /// Can be specified as an integer (e.g., "512") or a bit mask size (e.g., "/16").
-    /// Bit mask sizes are converted to the equivalent number of addresses (e.g., "/16" = 65536 addresses).
+    /// Maximum number of extra addresses allowed when merging CIDRs.
+    ///
+    /// Defaults to `0`, which means only lossless (exact) merges are performed.
+    /// When set to `N > 0`, the algorithm may merge networks even if the resulting
+    /// supernet covers addresses outside the original set, as long as the added
+    /// address count does not exceed `N`.
+    ///
+    /// Can be specified in two formats:
+    /// - Integer: A decimal number (e.g., `512`)
+    /// - Bit mask: A prefix length in CIDR notation (e.g., `"/16"`), which is converted
+    ///   to the equivalent number of addresses (e.g., `"/16"` = 65536 addresses)
+    ///
+    /// # Examples
+    ///
+    /// - `--tolerance 512` - Allow up to 512 extra addresses
+    /// - `--tolerance /16` - Allow up to 65536 extra addresses (equivalent to a /16 block)
     #[arg(short, long, default_value_t = 0, value_parser = parse_tolerance)]
     tolerance: u64,
     /// Validate that the input is already optimally merged. Exit code 1 if further merges are possible.
@@ -65,6 +101,22 @@ fn normalize_for_check(mut nets: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
     nets
 }
 
+/// Main entry point for the CIDR merge utility.
+///
+/// Reads IPv4 CIDR blocks from a file or standard input, merges them into a minimal
+/// covering set, and prints the results to standard output (one CIDR per line).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The input file cannot be opened or read
+/// - Any line contains an invalid CIDR block
+/// - Standard input cannot be read
+///
+/// # Exit Codes
+///
+/// - `0` - Success
+/// - Non-zero - Error occurred
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 

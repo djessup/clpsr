@@ -2,6 +2,18 @@ use clpsr::parse_ipv4_nets;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use std::io::Cursor;
 
+/// Generates test data with the specified number of CIDR blocks.
+///
+/// Creates a string containing `size` CIDR blocks, one per line, using the pattern
+/// `10.0.{i % 256}.0/24` to cycle through valid third octet values.
+///
+/// # Arguments
+///
+/// * `size` - Number of CIDR blocks to generate
+///
+/// # Returns
+///
+/// A string containing the CIDR blocks, one per line
 fn generate_test_data(size: usize) -> String {
     let mut data = String::new();
     for i in 0..size {
@@ -10,6 +22,7 @@ fn generate_test_data(size: usize) -> String {
     data
 }
 
+/// Benchmarks parsing 10 CIDR blocks.
 fn bench_parse_small(c: &mut Criterion) {
     let input = generate_test_data(10);
     c.bench_function("parse_10_cidrs", |b| {
@@ -20,6 +33,7 @@ fn bench_parse_small(c: &mut Criterion) {
     });
 }
 
+/// Benchmarks parsing 100 CIDR blocks.
 fn bench_parse_medium(c: &mut Criterion) {
     let input = generate_test_data(100);
     c.bench_function("parse_100_cidrs", |b| {
@@ -30,6 +44,7 @@ fn bench_parse_medium(c: &mut Criterion) {
     });
 }
 
+/// Benchmarks parsing 1000 CIDR blocks.
 fn bench_parse_large(c: &mut Criterion) {
     let input = generate_test_data(1000);
     c.bench_function("parse_1000_cidrs", |b| {
@@ -40,6 +55,7 @@ fn bench_parse_large(c: &mut Criterion) {
     });
 }
 
+/// Benchmarks parsing 10000 CIDR blocks.
 fn bench_parse_very_large(c: &mut Criterion) {
     let input = generate_test_data(10000);
     c.bench_function("parse_10000_cidrs", |b| {
@@ -50,6 +66,9 @@ fn bench_parse_very_large(c: &mut Criterion) {
     });
 }
 
+/// Benchmarks parsing 100 CIDR blocks interspersed with empty lines.
+///
+/// Tests the performance impact of skipping empty lines during parsing.
 fn bench_parse_with_empty_lines(c: &mut Criterion) {
     let mut input = String::new();
     for i in 0..100 {

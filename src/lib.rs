@@ -1,3 +1,24 @@
+//! CIDR merge utility library.
+//!
+//! This library provides functionality to parse, normalize, and merge IPv4 CIDR blocks
+//! into a minimal covering set. It supports both lossless (exact) merging and merging
+//! with tolerance for extra addresses.
+//!
+//! # Examples
+//!
+//! ```
+//! use clpsr::{parse_ipv4_nets, merge_ipv4_nets};
+//! use std::io::Cursor;
+//!
+//! let input = "10.0.0.0/24\n10.0.1.0/24\n10.0.2.0/24\n10.0.3.0/24";
+//! let reader = Cursor::new(input);
+//! let nets = parse_ipv4_nets(reader).unwrap();
+//! let merged = merge_ipv4_nets(nets, 0);
+//!
+//! assert_eq!(merged.len(), 1);
+//! assert_eq!(merged[0].to_string(), "10.0.0.0/22");
+//! ```
+
 use std::io::BufRead;
 
 use ipnet::Ipv4Net;
@@ -70,6 +91,14 @@ pub fn merge_ipv4_nets(nets: Vec<Ipv4Net>, tolerance: u64) -> Vec<Ipv4Net> {
     normalized
 }
 
+/// Sorts networks by network address (as u32), then by prefix length, and removes duplicates.
+///
+/// Networks are sorted first by their network address in ascending order, then by prefix length
+/// in ascending order. After sorting, consecutive duplicate networks are removed.
+///
+/// # Arguments
+///
+/// * `nets` - Mutable vector of IPv4 networks to sort and deduplicate
 #[cfg(test)]
 pub(crate) fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) {
     nets.sort_by(|a, b| {
@@ -80,6 +109,14 @@ pub(crate) fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) {
     nets.dedup();
 }
 
+/// Sorts networks by network address (as u32), then by prefix length, and removes duplicates.
+///
+/// Networks are sorted first by their network address in ascending order, then by prefix length
+/// in ascending order. After sorting, consecutive duplicate networks are removed.
+///
+/// # Arguments
+///
+/// * `nets` - Mutable vector of IPv4 networks to sort and deduplicate
 #[cfg(not(test))]
 fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) {
     nets.sort_by(|a, b| {
@@ -90,16 +127,47 @@ fn sort_and_dedup(nets: &mut Vec<Ipv4Net>) {
     nets.dedup();
 }
 
+/// Removes networks that are fully covered by other networks in the list.
+///
+/// This function assumes the input is sorted by network address and prefix length.
+/// It removes any network that is completely contained within a preceding network.
+///
+/// # Arguments
+///
+/// * `nets` - Vector of IPv4 networks (must be sorted)
+///
+/// # Returns
+///
+/// A tuple containing:
+/// - The compacted vector with covered networks removed
+/// - A boolean indicating whether any networks were removed
 #[cfg(test)]
 pub(crate) fn remove_covered_nets(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
     remove_covered_nets_impl(nets)
 }
 
+/// Removes networks that are fully covered by other networks in the list.
+///
+/// This function assumes the input is sorted by network address and prefix length.
+/// It removes any network that is completely contained within a preceding network.
+///
+/// # Arguments
+///
+/// * `nets` - Vector of IPv4 networks (must be sorted)
+///
+/// # Returns
+///
+/// A tuple containing:
+/// - The compacted vector with covered networks removed
+/// - A boolean indicating whether any networks were removed
 #[cfg(not(test))]
 fn remove_covered_nets(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
     remove_covered_nets_impl(nets)
 }
 
+/// Implementation of `remove_covered_nets`.
+///
+/// See `remove_covered_nets` for documentation.
 fn remove_covered_nets_impl(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
     if nets.is_empty() {
         return (nets, false);
@@ -122,17 +190,46 @@ fn remove_covered_nets_impl(nets: Vec<Ipv4Net>) -> (Vec<Ipv4Net>, bool) {
     (compacted, removed_any)
 }
 
+/// Checks if a supernet fully covers a subnet.
+///
+/// Returns `true` if the supernet's address range completely contains the subnet's
+/// address range. This includes cases where the networks are identical.
+///
+/// # Arguments
+///
+/// * `supernet` - The potential supernet network
+/// * `subnet` - The potential subnet network
+///
+/// # Returns
+///
+/// `true` if `supernet` covers `subnet`, `false` otherwise
 #[cfg(test)]
 pub(crate) fn network_covers(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
     network_covers_impl(supernet, subnet)
 }
 
+/// Checks if a supernet fully covers a subnet.
+///
+/// Returns `true` if the supernet's address range completely contains the subnet's
+/// address range. This includes cases where the networks are identical.
+///
+/// # Arguments
+///
+/// * `supernet` - The potential supernet network
+/// * `subnet` - The potential subnet network
+///
+/// # Returns
+///
+/// `true` if `supernet` covers `subnet`, `false` otherwise
 #[cfg(not(test))]
 #[allow(dead_code)]
 fn network_covers(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
     network_covers_impl(supernet, subnet)
 }
 
+/// Implementation of `network_covers`.
+///
+/// See `network_covers` for documentation.
 fn network_covers_impl(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
     if supernet.prefix_len() > subnet.prefix_len() {
         return false;
@@ -147,11 +244,23 @@ fn network_covers_impl(supernet: &Ipv4Net, subnet: &Ipv4Net) -> bool {
     super_start <= sub_start && super_end >= sub_end
 }
 
-/// Attempts to merge two networks, returning the supernet and extra address count if successful.
+/// Attempts to merge two networks within the specified tolerance.
 ///
-/// Returns `Some((supernet, extra_addrs))` if the networks can be merged within tolerance,
-/// where `extra_addrs` is the number of addresses in the supernet that weren't in the original networks.
-/// Returns `None` if merging is not possible or would exceed tolerance.
+/// First attempts an exact (lossless) merge. If that fails and `tolerance > 0`, attempts
+/// to find a covering supernet and checks if the extra addresses introduced are within tolerance.
+///
+/// # Arguments
+///
+/// * `a` - First network to merge
+/// * `b` - Second network to merge
+/// * `tolerance` - Maximum number of extra addresses allowed (0 for exact merges only)
+///
+/// # Returns
+///
+/// * `Some((supernet, extra_addrs))` if merge is possible within tolerance:
+///   - `supernet`: The merged network covering both inputs
+///   - `extra_addrs`: Number of addresses in the supernet not in the original networks
+/// * `None` if merge is not possible or would exceed tolerance
 fn try_merge_with_tolerance(a: &Ipv4Net, b: &Ipv4Net, tolerance: u64) -> Option<(Ipv4Net, u64)> {
     // First, try exact merge (lossless)
     if let Some(supernet) = try_merge_exact(a, b) {
@@ -189,17 +298,48 @@ fn try_merge_with_tolerance(a: &Ipv4Net, b: &Ipv4Net, tolerance: u64) -> Option<
 }
 
 /// Attempts an exact (lossless) merge of two networks.
-/// Only succeeds if networks are adjacent with identical prefix lengths.
+///
+/// Only succeeds if both networks have identical prefix lengths and are adjacent
+/// (i.e., the second network immediately follows the first, aligned to block boundaries).
+/// The result is a supernet with prefix length one less than the inputs.
+///
+/// # Arguments
+///
+/// * `a` - First network to merge
+/// * `b` - Second network to merge
+///
+/// # Returns
+///
+/// * `Some(supernet)` if the networks can be merged exactly
+/// * `None` if the networks are not adjacent or have different prefix lengths
 #[cfg(test)]
 pub(crate) fn try_merge_exact(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     try_merge_exact_impl(a, b)
 }
 
+/// Attempts an exact (lossless) merge of two networks.
+///
+/// Only succeeds if both networks have identical prefix lengths and are adjacent
+/// (i.e., the second network immediately follows the first, aligned to block boundaries).
+/// The result is a supernet with prefix length one less than the inputs.
+///
+/// # Arguments
+///
+/// * `a` - First network to merge
+/// * `b` - Second network to merge
+///
+/// # Returns
+///
+/// * `Some(supernet)` if the networks can be merged exactly
+/// * `None` if the networks are not adjacent or have different prefix lengths
 #[cfg(not(test))]
 fn try_merge_exact(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     try_merge_exact_impl(a, b)
 }
 
+/// Implementation of `try_merge_exact`.
+///
+/// See `try_merge_exact` for documentation.
 fn try_merge_exact_impl(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     if a.prefix_len() != b.prefix_len() || a.prefix_len() == 0 {
         return None;
@@ -222,17 +362,48 @@ fn try_merge_exact_impl(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
 }
 
 /// Finds the minimal supernet that covers both networks.
-/// Returns None if no such supernet exists (shouldn't happen for valid IPv4 networks).
+///
+/// Calculates the smallest CIDR block that contains both input networks by finding
+/// the address range spanning both networks and determining the appropriate prefix length.
+/// The network address is aligned to the prefix boundary.
+///
+/// # Arguments
+///
+/// * `a` - First network
+/// * `b` - Second network
+///
+/// # Returns
+///
+/// * `Some(supernet)` - The minimal covering supernet (always succeeds for valid IPv4 networks)
+/// * `None` - Should not occur for valid IPv4 networks
 #[cfg(test)]
 pub(crate) fn find_covering_supernet(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     find_covering_supernet_impl(a, b)
 }
 
+/// Finds the minimal supernet that covers both networks.
+///
+/// Calculates the smallest CIDR block that contains both input networks by finding
+/// the address range spanning both networks and determining the appropriate prefix length.
+/// The network address is aligned to the prefix boundary.
+///
+/// # Arguments
+///
+/// * `a` - First network
+/// * `b` - Second network
+///
+/// # Returns
+///
+/// * `Some(supernet)` - The minimal covering supernet (always succeeds for valid IPv4 networks)
+/// * `None` - Should not occur for valid IPv4 networks
 #[cfg(not(test))]
 fn find_covering_supernet(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     find_covering_supernet_impl(a, b)
 }
 
+/// Implementation of `find_covering_supernet`.
+///
+/// See `find_covering_supernet` for documentation.
 fn find_covering_supernet_impl(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
     let a_start = u32::from(a.network());
     let a_end = u32::from(a.broadcast());
@@ -265,27 +436,80 @@ fn find_covering_supernet_impl(a: &Ipv4Net, b: &Ipv4Net) -> Option<Ipv4Net> {
 }
 
 /// Returns the number of addresses in a network.
+///
+/// Calculates the total number of IP addresses covered by the network, including
+/// the network and broadcast addresses. For a network with prefix length `n`,
+/// this is `2^(32 - n)`.
+///
+/// # Arguments
+///
+/// * `net` - The IPv4 network
+///
+/// # Returns
+///
+/// The number of addresses in the network (e.g., `/24` = 256, `/16` = 65536)
 #[cfg(test)]
 pub(crate) fn network_address_count(net: &Ipv4Net) -> u64 {
     1u64 << (32 - net.prefix_len())
 }
 
+/// Returns the number of addresses in a network.
+///
+/// Calculates the total number of IP addresses covered by the network, including
+/// the network and broadcast addresses. For a network with prefix length `n`,
+/// this is `2^(32 - n)`.
+///
+/// # Arguments
+///
+/// * `net` - The IPv4 network
+///
+/// # Returns
+///
+/// The number of addresses in the network (e.g., `/24` = 256, `/16` = 65536)
 #[cfg(not(test))]
 fn network_address_count(net: &Ipv4Net) -> u64 {
     1u64 << (32 - net.prefix_len())
 }
 
 /// Calculates the number of overlapping addresses between two networks.
+///
+/// Returns the count of IP addresses that are present in both networks.
+/// If the networks are disjoint or adjacent (no overlap), returns 0.
+///
+/// # Arguments
+///
+/// * `a` - First network
+/// * `b` - Second network
+///
+/// # Returns
+///
+/// The number of addresses that overlap between the two networks
 #[cfg(test)]
 pub(crate) fn network_overlap(a: &Ipv4Net, b: &Ipv4Net) -> u64 {
     network_overlap_impl(a, b)
 }
 
+/// Calculates the number of overlapping addresses between two networks.
+///
+/// Returns the count of IP addresses that are present in both networks.
+/// If the networks are disjoint or adjacent (no overlap), returns 0.
+///
+/// # Arguments
+///
+/// * `a` - First network
+/// * `b` - Second network
+///
+/// # Returns
+///
+/// The number of addresses that overlap between the two networks
 #[cfg(not(test))]
 fn network_overlap(a: &Ipv4Net, b: &Ipv4Net) -> u64 {
     network_overlap_impl(a, b)
 }
 
+/// Implementation of `network_overlap`.
+///
+/// See `network_overlap` for documentation.
 fn network_overlap_impl(a: &Ipv4Net, b: &Ipv4Net) -> u64 {
     let a_start = u32::from(a.network());
     let a_end = u32::from(a.broadcast());
