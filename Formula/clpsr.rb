@@ -6,16 +6,16 @@ class Clpsr < Formula
   on_macos do
     if Hardware::CPU.intel?
       url "https://github.com/djessup/clpsr/releases/download/v1.0.0/clpsr-macos-x86_64.tar.gz"
-      sha256 "3ddc31c79da352beba3c8b84d99f97f74043a98d84a4a82e400bea04a640494b"
+      sha256 "a45dc31449750e301905aed3c28baeb0b63dd5211b521617f08887596517c8b5"
     else
       url "https://github.com/djessup/clpsr/releases/download/v1.0.0/clpsr-macos-aarch64.tar.gz"
-      sha256 "baf72923cc744ede12347de24deaad3d4126db1e5c0c9c37d1fbe80cb11b5d83"
+      sha256 "a5bd1a5ce7d14c26528d74daf81a2c703b48c562e5093b2a24e8331e9feeef4b"
     end
   end
 
   on_linux do
     url "https://github.com/djessup/clpsr/releases/download/v1.0.0/clpsr-linux-amd64.tar.gz"
-    sha256 "e519544fb81280e1bd1e3c4e08801a61f58739d9a412ae0518fb26c95fedc4fa"
+    sha256 "48dd84023b8e0ec5f8922f5a90752219dbc33fc8a97767fd2851a38329ff7d71"
   end
 
   def install
