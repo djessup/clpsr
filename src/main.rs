@@ -1,8 +1,10 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
+use std::process;
 
 use clap::Parser;
+use ipnet::Ipv4Net;
 
 use clpsr::{merge_ipv4_nets, parse_ipv4_nets};
 
@@ -46,6 +48,21 @@ struct Args {
     /// Bit mask sizes are converted to the equivalent number of addresses (e.g., "/16" = 65536 addresses).
     #[arg(short, long, default_value_t = 0, value_parser = parse_tolerance)]
     tolerance: u64,
+    /// Validate that the input is already optimally merged. Exit code 1 if further merges are possible.
+    #[arg(long)]
+    check: bool,
+}
+
+fn normalize_for_check(mut nets: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
+    // Check mode must detect any change the merge step would perform, including dropping
+    // duplicates. Sorting provides a stable ordering for comparison while preserving the
+    // original multiplicity so that repeated CIDRs remain visible as a behavioral change.
+    nets.sort_by(|a, b| {
+        u32::from(a.addr())
+            .cmp(&u32::from(b.addr()))
+            .then(a.prefix_len().cmp(&b.prefix_len()))
+    });
+    nets
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -58,7 +75,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let nets =
         parse_ipv4_nets(reader).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    let merged = merge_ipv4_nets(nets, args.tolerance);
+    let merged = merge_ipv4_nets(nets.clone(), args.tolerance);
+
+    if args.check {
+        let normalized_input = normalize_for_check(nets);
+
+        if normalized_input != merged {
+            process::exit(1);
+        }
+
+        return Ok(());
+    }
 
     for net in merged {
         println!("{net}");
