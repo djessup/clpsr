@@ -220,3 +220,131 @@ fn test_cli_with_tolerance_bit_mask_invalid() {
     let stderr = str::from_utf8(&output.stderr).unwrap_or("");
     assert!(stderr.contains("Prefix length must be between 0 and 32"));
 }
+
+#[test]
+fn test_cli_check_mode_succeeds_when_optimal() {
+    use std::io::Write;
+
+    let mut child = Command::new("cargo")
+        .args(["run", "--", "--check"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn cargo run");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        // Already minimal and ordered
+        stdin
+            .write_all(b"10.0.0.0/23\n10.0.2.0/24")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn test_cli_check_mode_detects_pending_merges() {
+    use std::io::Write;
+
+    let mut child = Command::new("cargo")
+        .args(["run", "--", "--check"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn cargo run");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        // Adjacent networks can merge into a /23
+        stdin
+            .write_all(b"10.0.0.0/24\n10.0.1.0/24")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn test_cli_check_mode_detects_duplicates() {
+    use std::io::Write;
+
+    let mut child = Command::new("cargo")
+        .args(["run", "--", "--check"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn cargo run");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        // Duplicate entries should cause check mode to fail because the merge would drop them.
+        stdin
+            .write_all(b"10.0.0.0/24\n10.0.0.0/24")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn test_cli_check_mode_detects_duplicates_after_skipped_lines() {
+    use std::io::Write;
+
+    let mut child = Command::new("cargo")
+        .args(["run", "--", "--check"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn cargo run");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        // Empty and whitespace-only lines are ignored by the parser, but duplicates should still
+        // cause check mode to fail because the merge would drop them.
+        stdin
+            .write_all(b"\n  \n10.0.0.0/24\n\n10.0.0.0/24   \n")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn test_cli_check_mode_rejects_invalid_input() {
+    use std::io::Write;
+
+    let mut child = Command::new("cargo")
+        .args(["run", "--", "--check"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn cargo run");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        // Invalid CIDR should surface an error that includes the source line number.
+        stdin
+            .write_all(b"10.0.0.0/24\n\nnot-a-cidr\n10.0.2.0/24\n")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+    let stderr = str::from_utf8(&output.stderr).unwrap_or("");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("Line 3:"));
+    assert!(stderr.contains("invalid IP address syntax"));
+}
