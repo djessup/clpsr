@@ -10,6 +10,20 @@ network-address management tools when you only need quick CIDR aggregation.
 
 ## Installation
 
+### Homebrew (macOS and Linux)
+
+```bash
+brew tap djessup/clpsr
+brew install clpsr
+```
+
+Or install directly (automatically taps):
+```bash
+brew install djessup/clpsr/clpsr
+```
+
+### Cargo
+
 Build from source with Cargo:
 
 ```bash
