@@ -24,4 +24,3 @@ inherit = "default"
 output = { type = "summary", verbosity = "normal" }
 # Don't fail fast in CI - run all tests to get full coverage
 fail-fast = false
-

@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  ENABLE_CODECOV: false
 
 jobs:
   test:
@@ -58,8 +59,9 @@ jobs:
 
       - name: Generate coverage report (HTML)
         run: cargo llvm-cov nextest --all-features --workspace --html --output-dir coverage
-
-      - name: Upload coverage to Codecov
+        
+      - if: ${{ env.ENABLE_CODECOV }} 
+        name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: ./lcov.info
@@ -67,6 +69,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: unittests
           name: codecov-umbrella
+        
 
       - name: Upload coverage reports as artifact
         uses: actions/upload-artifact@v4

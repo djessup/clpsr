@@ -18,12 +18,21 @@ jobs:
           - os: ubuntu-latest
             archive: tar.gz
             bin_path: target/release/clpsr
-          - os: macos-latest
+            artifact_name: ubuntu-latest
+          - os: macos-13
             archive: tar.gz
             bin_path: target/release/clpsr
+            artifact_name: macos-x86_64
+            arch: x86_64
+          - os: macos-14
+            archive: tar.gz
+            bin_path: target/release/clpsr
+            artifact_name: macos-arm64
+            arch: arm64
           - os: windows-latest
             archive: zip
             bin_path: target/release/clpsr.exe
+            artifact_name: windows-latest
 
     steps:
       - name: Checkout repository
@@ -41,9 +50,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.arch || 'default' }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-${{ matrix.arch || 'default' }}-cargo-release-
 
       - name: Build release binary
         run: cargo build --all --all-features --release
@@ -52,7 +61,7 @@ jobs:
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
-          artifact="${{ env.BIN_NAME }}-${{ matrix.os }}.${{ matrix.archive }}"
+          artifact="${{ env.BIN_NAME }}-${{ matrix.artifact_name }}.${{ matrix.archive }}"
           tar czf "$artifact" -C target/release "${{ env.BIN_NAME }}"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
         id: package
@@ -61,7 +70,7 @@ jobs:
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          $artifact = "${{ env.BIN_NAME }}-${{ matrix.os }}.${{ matrix.archive }}"
+          $artifact = "${{ env.BIN_NAME }}-${{ matrix.artifact_name }}.${{ matrix.archive }}"
           Compress-Archive -Path "${{ matrix.bin_path }}" -DestinationPath $artifact
           # robustly write output in PowerShell
           Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact=$artifact"
@@ -70,9 +79,9 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.BIN_NAME }}-${{ matrix.os }}
+          name: ${{ env.BIN_NAME }}-${{ matrix.artifact_name }}
           # deterministic path rather than relying on conditional step outputs
-          path: ${{ env.BIN_NAME }}-${{ matrix.os }}.${{ matrix.archive }}
+          path: ${{ env.BIN_NAME }}-${{ matrix.artifact_name }}.${{ matrix.archive }}
 
   release:
     needs: build
@@ -91,3 +100,171 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
+          tag_name: ${{ github.ref_name }}
+
+  update-homebrew:
+    needs: release
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Calculate SHA256 checksums
+        id: checksums
+        run: |
+          cd artifacts
+          
+          # Find all tar.gz files (macOS and Linux) - search recursively
+          MACOS_X86_64=$(find . -name "clpsr-macos-x86_64.tar.gz" -type f | head -1)
+          MACOS_ARM64=$(find . -name "clpsr-macos-arm64.tar.gz" -type f | head -1)
+          LINUX=$(find . -name "clpsr-ubuntu-latest.tar.gz" -type f | head -1)
+          
+          echo "Found artifacts:"
+          echo "  macOS x86_64: ${MACOS_X86_64:-not found}"
+          echo "  macOS arm64: ${MACOS_ARM64:-not found}"
+          echo "  Linux: ${LINUX:-not found}"
+          
+          if [ -n "$MACOS_X86_64" ] && [ -f "$MACOS_X86_64" ]; then
+            SHA_X86_64=$(shasum -a 256 "$MACOS_X86_64" | awk '{print $1}')
+            echo "sha_x86_64=$SHA_X86_64" >> $GITHUB_OUTPUT
+            echo "macOS x86_64 SHA256: $SHA_X86_64"
+          else
+            echo "Warning: macOS x86_64 artifact not found"
+          fi
+          
+          if [ -n "$MACOS_ARM64" ] && [ -f "$MACOS_ARM64" ]; then
+            SHA_ARM64=$(shasum -a 256 "$MACOS_ARM64" | awk '{print $1}')
+            echo "sha_arm64=$SHA_ARM64" >> $GITHUB_OUTPUT
+            echo "macOS arm64 SHA256: $SHA_ARM64"
+          else
+            echo "Warning: macOS arm64 artifact not found"
+          fi
+          
+          if [ -n "$LINUX" ] && [ -f "$LINUX" ]; then
+            SHA_LINUX=$(shasum -a 256 "$LINUX" | awk '{print $1}')
+            echo "sha_linux=$SHA_LINUX" >> $GITHUB_OUTPUT
+            echo "Linux SHA256: $SHA_LINUX"
+          else
+            echo "Warning: Linux artifact not found"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Update Homebrew formula
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          FORMULA_FILE="Formula/clpsr.rb"
+          
+          # Backup original file for diff
+          cp "$FORMULA_FILE" "${FORMULA_FILE}.orig"
+          
+          # Use Python to update the formula file reliably
+          python3 << 'EOF'
+          import re
+          import sys
+          
+          version = "${{ steps.version.outputs.version }}"
+          sha_x86_64 = "${{ steps.checksums.outputs.sha_x86_64 }}"
+          sha_arm64 = "${{ steps.checksums.outputs.sha_arm64 }}"
+          sha_linux = "${{ steps.checksums.outputs.sha_linux }}"
+          
+          formula_file = "Formula/clpsr.rb"
+          
+          with open(formula_file, 'r') as f:
+              content = f.read()
+          
+          # Update version in URLs - handle both placeholders and existing versions
+          content = re.sub(
+              r'/download/(?:v[0-9][0-9.]*|<RELEASE_VERSION>)/clpsr-',
+              f'/download/v{version}/clpsr-',
+              content
+          )
+          
+          # Update SHA256 checksums
+          if sha_x86_64:
+              # Replace placeholder or existing checksum for x86_64
+              content = re.sub(
+                  r'sha256\s+"<SHA256_FOR_X86_64>"',
+                  f'sha256 "{sha_x86_64}"',
+                  content
+              )
+              # Replace existing checksum on line after macos-x86_64 URL
+              content = re.sub(
+                  r'(url\s+"[^"]*macos-x86_64\.tar\.gz"[^\n]*\n\s+sha256\s+")[a-f0-9]{64}(")',
+                  f'\\g<1>{sha_x86_64}\\g<2>',
+                  content
+              )
+          
+          if sha_arm64:
+              # Replace placeholder or existing checksum for arm64
+              content = re.sub(
+                  r'sha256\s+"<SHA256_FOR_ARM64>"',
+                  f'sha256 "{sha_arm64}"',
+                  content
+              )
+              # Replace existing checksum on line after macos-arm64 URL
+              content = re.sub(
+                  r'(url\s+"[^"]*macos-arm64\.tar\.gz"[^\n]*\n\s+sha256\s+")[a-f0-9]{64}(")',
+                  f'\\g<1>{sha_arm64}\\g<2>',
+                  content
+              )
+          
+          if sha_linux:
+              # Replace placeholder or existing checksum for Linux
+              content = re.sub(
+                  r'sha256\s+"<SHA256_FOR_LINUX>"',
+                  f'sha256 "{sha_linux}"',
+                  content
+              )
+              # Replace existing checksum on line after ubuntu-latest URL
+              content = re.sub(
+                  r'(url\s+"[^"]*ubuntu-latest\.tar\.gz"[^\n]*\n\s+sha256\s+")[a-f0-9]{64}(")',
+                  f'\\g<1>{sha_linux}\\g<2>',
+                  content
+              )
+          
+          with open(formula_file, 'w') as f:
+              f.write(content)
+          
+          print("Formula updated successfully")
+          EOF
+          
+          # Show changes
+          echo "=== Formula changes ==="
+          diff "${FORMULA_FILE}.orig" "$FORMULA_FILE" || true
+          echo ""
+          echo "=== Updated formula ==="
+          cat "$FORMULA_FILE"
+          rm -f "${FORMULA_FILE}.orig"
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          if git diff --quiet Formula/clpsr.rb; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
+          git add Formula/clpsr.rb
+          git commit -m "chore(homebrew): update formula to v${{ steps.version.outputs.version }}"
+          git push origin main

@@ -11,3 +11,4 @@ coverage/
 
 # Nextest
 .nextest/
+payload.json
