@@ -87,6 +87,9 @@ struct Args {
     /// Validate that the input is already optimally merged. Exit code 1 if further merges are possible.
     #[arg(long)]
     check: bool,
+    /// Show merge statistics (also available as `--verbose`).
+    #[arg(long, alias = "verbose")]
+    stats: bool,
 }
 
 fn normalize_for_check(mut nets: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
@@ -99,6 +102,12 @@ fn normalize_for_check(mut nets: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
             .then(a.prefix_len().cmp(&b.prefix_len()))
     });
     nets
+}
+
+fn total_addresses(nets: &[Ipv4Net]) -> u128 {
+    nets.iter()
+        .map(|net| 1u128 << (32 - net.prefix_len()))
+        .sum()
 }
 
 /// Main entry point for the CIDR merge utility.
@@ -128,6 +137,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nets =
         parse_ipv4_nets(reader).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     let merged = merge_ipv4_nets(nets.clone(), args.tolerance);
+
+    if args.stats {
+        let normalized_input = merge_ipv4_nets(nets.clone(), 0);
+        let input_total = total_addresses(&normalized_input);
+        let merged_total = total_addresses(&merged);
+        let reduction = if nets.is_empty() {
+            0.0
+        } else {
+            ((nets.len() as f64 - merged.len() as f64) / nets.len() as f64) * 100.0
+        };
+
+        eprintln!("CIDR merge statistics:");
+        eprintln!("  Input CIDRs: {}", nets.len());
+        eprintln!("  Merged CIDRs: {}", merged.len());
+        eprintln!("  Reduction: {:.2}%", reduction);
+        eprintln!("  Total addresses (input): {input_total}");
+        eprintln!("  Total addresses (merged): {merged_total}");
+        let extra_addresses = merged_total.saturating_sub(input_total);
+        if extra_addresses > 0 {
+            eprintln!("  Extra addresses from tolerance: {extra_addresses}");
+        }
+    }
 
     if args.check {
         let normalized_input = normalize_for_check(nets);
