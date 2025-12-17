@@ -1,6 +1,6 @@
-use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use ipnet::Ipv4Net;
+use std::hint::black_box;
 
 use clpsr::merge_ipv4_nets;
 

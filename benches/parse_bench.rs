@@ -1,5 +1,5 @@
-use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::io::Cursor;
 
 use clpsr::parse_ipv4_nets;
