@@ -222,6 +222,38 @@ fn test_cli_with_tolerance_bit_mask_invalid() {
 }
 
 #[test]
+fn test_cli_with_stats_outputs_to_stderr() {
+    use std::io::Write;
+
+    let mut child = Command::new("cargo")
+        .args(["run", "--", "--stats"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn cargo run");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(b"10.0.0.0/24\n10.0.1.0/24\n")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to read output");
+    let stderr = str::from_utf8(&output.stderr).unwrap_or("");
+    let stdout = str::from_utf8(&output.stdout).unwrap_or("").trim();
+
+    assert!(output.status.success());
+    assert_eq!(stdout, "10.0.0.0/23");
+    assert!(stderr.contains("CIDR merge statistics:"));
+    assert!(stderr.contains("Input CIDRs: 2"));
+    assert!(stderr.contains("Merged CIDRs: 1"));
+    assert!(stderr.contains("Reduction: 50.00%"));
+    assert!(stderr.contains("Total addresses (input): 512"));
+    assert!(stderr.contains("Total addresses (merged): 512"));
+}
+
+#[test]
 fn test_cli_check_mode_succeeds_when_optimal() {
     use std::io::Write;
 
