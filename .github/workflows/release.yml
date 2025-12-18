@@ -133,7 +133,7 @@ jobs:
         id: package-win
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.BIN_NAME }}-${{ matrix.artifact_name }}
           # deterministic path rather than relying on conditional step outputs
@@ -148,7 +148,7 @@ jobs:
 
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
@@ -175,7 +175,7 @@ jobs:
           echo "Version: $VERSION"
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
