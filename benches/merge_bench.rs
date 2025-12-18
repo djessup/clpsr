@@ -1,6 +1,8 @@
-use clpsr::merge_ipv4_nets;
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ipnet::Ipv4Net;
+use std::hint::black_box;
+
+use clpsr::merge_ipv4_nets;
 
 /// Generates a vector of adjacent networks that can be merged.
 ///
